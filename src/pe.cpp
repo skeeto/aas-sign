@@ -2,7 +2,9 @@
 #include "sha256.h"
 #include <stdexcept>
 #include <cstring>
-#ifndef _WIN32
+#ifdef _WIN32
+#include <io.h>
+#else
 #include <unistd.h>
 #endif
 
@@ -151,7 +153,7 @@ void PeFile::inject_signature(const std::vector<uint8_t> &cms_der)
             // Truncate file.
             fflush(f);
 #ifdef _WIN32
-            _chsize_s(_fileno(f), write_offset + win_cert.size());
+            _chsize(_fileno(f), (long)(write_offset + win_cert.size()));
 #else
             ftruncate(fileno(f), write_offset + win_cert.size());
 #endif

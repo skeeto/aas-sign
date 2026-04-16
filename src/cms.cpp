@@ -2,6 +2,7 @@
 #include "der.h"
 #include "sha256.h"
 #include "x509.h"
+#include <stdexcept>
 
 // Well-known OIDs.
 static Bytes oid_signed_data()       { return der_oid("1.2.840.113549.1.7.2"); }
