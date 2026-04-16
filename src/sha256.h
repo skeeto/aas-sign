@@ -4,6 +4,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace platform {
 
@@ -30,6 +31,14 @@ HttpResponse https_post(const std::string &host, const std::string &path,
 
 HttpResponse https_get(const std::string &host, const std::string &path,
                        const std::string &bearer_token);
+
+// Plain HTTP POST with a binary body.  Used for RFC 3161 timestamping where
+// integrity is guaranteed by the TSA's own signature rather than TLS.
+HttpResponse http_post_binary(const std::string &host, int port,
+                              const std::string &path,
+                              const std::string &content_type,
+                              const std::string &accept,
+                              const std::vector<uint8_t> &body);
 
 }  // namespace platform
 

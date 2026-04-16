@@ -30,6 +30,7 @@ add_executable(aas-sign
   src/pe.cpp
   src/azure.cpp
   src/cms.cpp
+  src/tsa.cpp
   $<$<PLATFORM_ID:Windows>:src/win32.cpp>
   $<$<NOT:$<PLATFORM_ID:Windows>>:src/posix.cpp>
 )

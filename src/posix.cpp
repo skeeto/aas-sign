@@ -7,6 +7,11 @@
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/error.h>
 
+#include <cstring>
+#include <netdb.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
 #include <sstream>
 #include <stdexcept>
 
@@ -236,6 +241,79 @@ HttpResponse https_get(const std::string &host, const std::string &path,
                        const std::string &bearer_token)
 {
     return do_request(host, "GET", path, bearer_token, nullptr);
+}
+
+HttpResponse http_post_binary(const std::string &host, int port,
+                              const std::string &path,
+                              const std::string &content_type,
+                              const std::string &accept,
+                              const std::vector<uint8_t> &body)
+{
+    addrinfo hints{};
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+
+    std::string port_str = std::to_string(port);
+    addrinfo *res = nullptr;
+    int gai = getaddrinfo(host.c_str(), port_str.c_str(), &hints, &res);
+    if (gai != 0)
+        throw std::runtime_error("getaddrinfo " + host + ": " +
+                                 gai_strerror(gai));
+
+    int fd = -1;
+    for (addrinfo *a = res; a; a = a->ai_next) {
+        fd = socket(a->ai_family, a->ai_socktype, a->ai_protocol);
+        if (fd < 0) continue;
+        if (connect(fd, a->ai_addr, a->ai_addrlen) == 0) break;
+        close(fd);
+        fd = -1;
+    }
+    freeaddrinfo(res);
+    if (fd < 0)
+        throw std::runtime_error("cannot connect to " + host + ":" + port_str);
+
+    std::ostringstream req;
+    req << "POST " << path << " HTTP/1.1\r\n";
+    req << "Host: " << host;
+    if (port != 80) req << ":" << port;
+    req << "\r\n";
+    req << "User-Agent: aas-sign/1.0\r\n";
+    req << "Content-Type: " << content_type << "\r\n";
+    if (!accept.empty())
+        req << "Accept: " << accept << "\r\n";
+    req << "Content-Length: " << body.size() << "\r\n";
+    req << "Connection: close\r\n\r\n";
+    std::string header = req.str();
+
+    auto write_n = [&](const uint8_t *p, size_t n) {
+        while (n > 0) {
+            ssize_t w = write(fd, p, n);
+            if (w <= 0) {
+                close(fd);
+                throw std::runtime_error("write to TSA failed");
+            }
+            p += w;
+            n -= size_t(w);
+        }
+    };
+    write_n(reinterpret_cast<const uint8_t *>(header.data()), header.size());
+    if (!body.empty())
+        write_n(body.data(), body.size());
+
+    std::string raw;
+    char buf[4096];
+    for (;;) {
+        ssize_t r = read(fd, buf, sizeof(buf));
+        if (r < 0) {
+            close(fd);
+            throw std::runtime_error("read from TSA failed");
+        }
+        if (r == 0) break;
+        raw.append(buf, size_t(r));
+    }
+    close(fd);
+
+    return parse_http_response(raw);
 }
 
 }  // namespace platform

@@ -1,6 +1,7 @@
 #include "azure.h"
 #include "cms.h"
 #include "pe.h"
+#include "tsa.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -8,16 +9,22 @@
 #include <iostream>
 #include <string>
 
+static const char DEFAULT_TSA_URL[] =
+    "http://timestamp.acs.microsoft.com/timestamping/RFC3161";
+
 static void usage(const char *argv0)
 {
     std::cerr << "usage: " << argv0
               << " --endpoint HOST --account NAME --profile NAME"
-              << " [--token TOKEN] [--dump-cms FILE] FILE\n";
+              << " [--token TOKEN] [--dump-cms FILE]"
+              << " [--timestamp-url URL | --no-timestamp] FILE\n";
 }
 
 int main(int argc, char **argv)
 {
     std::string endpoint, account, profile, token, file, dump_cms;
+    std::string timestamp_url = DEFAULT_TSA_URL;
+    bool no_timestamp = false;
 
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--endpoint") && i + 1 < argc)
@@ -30,6 +37,10 @@ int main(int argc, char **argv)
             token = argv[++i];
         else if (!strcmp(argv[i], "--dump-cms") && i + 1 < argc)
             dump_cms = argv[++i];
+        else if (!strcmp(argv[i], "--timestamp-url") && i + 1 < argc)
+            timestamp_url = argv[++i];
+        else if (!strcmp(argv[i], "--no-timestamp"))
+            no_timestamp = true;
         else if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
             usage(argv[0]);
             return 0;
@@ -75,10 +86,22 @@ int main(int argc, char **argv)
                                       token, attrs_hash.data(),
                                       attrs_hash.size());
 
-        // Step 4: Build CMS and inject into PE.
+        // Step 4: RFC 3161 timestamp (optional).
+        std::vector<uint8_t> timestamp_token;
+        if (!no_timestamp) {
+            std::cerr << "Requesting timestamp from " << timestamp_url
+                      << " ...\n";
+            timestamp_token = tsa_timestamp(timestamp_url,
+                                            sign_result.signature);
+            std::cerr << "Timestamp token received ("
+                      << timestamp_token.size() << " bytes)\n";
+        }
+
+        // Step 5: Build CMS and inject into PE.
         auto cms_der = cms_build_authenticode(pe_hash,
                                               sign_result.signature,
-                                              sign_result.cert_chain_der);
+                                              sign_result.cert_chain_der,
+                                              timestamp_token);
 
         if (!dump_cms.empty()) {
             std::ofstream out(dump_cms, std::ios::binary);

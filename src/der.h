@@ -23,6 +23,7 @@ Bytes der_oid(const char *dotted);
 Bytes der_octet_string(const uint8_t *data, size_t len);
 Bytes der_octet_string(const Bytes &data);
 Bytes der_bit_string(const uint8_t *data, size_t len);
+Bytes der_boolean(bool value);
 Bytes der_null();
 
 // Constructed types (convenience for tag + concatenated contents).

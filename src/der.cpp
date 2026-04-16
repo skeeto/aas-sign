@@ -151,6 +151,11 @@ Bytes der_bit_string(const uint8_t *data, size_t len)
     return der_wrap(0x03, content);
 }
 
+Bytes der_boolean(bool value)
+{
+    return {0x01, 0x01, uint8_t(value ? 0xff : 0x00)};
+}
+
 Bytes der_null()
 {
     return {0x05, 0x00};

@@ -14,6 +14,7 @@ static Bytes oid_sha256()            { return der_oid("2.16.840.1.101.3.4.2.1");
 static Bytes oid_rsa_encryption()    { return der_oid("1.2.840.113549.1.1.1"); }
 static Bytes oid_content_type()      { return der_oid("1.2.840.113549.1.9.3"); }
 static Bytes oid_message_digest()    { return der_oid("1.2.840.113549.1.9.4"); }
+static Bytes oid_spc_rfc3161()       { return der_oid("1.3.6.1.4.1.311.3.3.1"); }
 
 // SHA-256 AlgorithmIdentifier: SEQUENCE { OID sha-256, NULL }.
 static Bytes sha256_alg_id()
@@ -99,7 +100,8 @@ std::array<uint8_t, 32> cms_auth_attrs_hash(
 std::vector<uint8_t> cms_build_authenticode(
     const std::array<uint8_t, 32> &pe_hash,
     const std::vector<uint8_t> &signature,
-    const std::vector<uint8_t> &certs_der)
+    const std::vector<uint8_t> &certs_der,
+    const std::vector<uint8_t> &timestamp_token_der)
 {
     // Parse signing cert to get issuer + serial.
     auto certs = x509_split_certs(certs_der.data(), certs_der.size());
@@ -134,9 +136,29 @@ std::vector<uint8_t> cms_build_authenticode(
 
     auto si_signature = der_octet_string(signature.data(), signature.size());
 
-    auto signer_info = der_sequence({&si_version, &sid, &si_digest_alg,
-                                     &si_auth_attrs, &si_sig_alg,
-                                     &si_signature});
+    // Optional unsignedAttrs [1] IMPLICIT SET containing the RFC 3161
+    // timestamp token under OID 1.3.6.1.4.1.311.3.3.1.
+    Bytes si_unsigned_attrs;
+    if (!timestamp_token_der.empty()) {
+        auto ts_oid = oid_spc_rfc3161();
+        auto ts_token = der_raw(timestamp_token_der.data(),
+                                timestamp_token_der.size());
+        auto ts_val = der_set({&ts_token});
+        auto ts_attr = der_sequence({&ts_oid, &ts_val});
+        auto unsigned_set = der_set({&ts_attr});
+        si_unsigned_attrs = der_implicit(1, true, unsigned_set);
+    }
+
+    Bytes signer_info;
+    if (si_unsigned_attrs.empty()) {
+        signer_info = der_sequence({&si_version, &sid, &si_digest_alg,
+                                    &si_auth_attrs, &si_sig_alg,
+                                    &si_signature});
+    } else {
+        signer_info = der_sequence({&si_version, &sid, &si_digest_alg,
+                                    &si_auth_attrs, &si_sig_alg,
+                                    &si_signature, &si_unsigned_attrs});
+    }
 
     // --- SignedData ---
 
