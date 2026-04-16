@@ -14,13 +14,14 @@ PE.
     cmake -B build
     cmake --build build
 
-C++17. Dependencies fetched via CMake FetchContent (nlohmann/json, mbedTLS
-on POSIX). Windows uses only system APIs (BCrypt, WinHTTP).
+C++20 (needed for `std::jthread`). Dependencies fetched via CMake
+FetchContent (nlohmann/json, mbedTLS on POSIX). Windows uses only system
+APIs (BCrypt, WinHTTP). pthreads on POSIX, winpthreads on MinGW.
 
 ## Architecture
 
 ```
-main.cpp        CLI, orchestrates signing flow
+main.cpp        CLI, worker pool, orchestrates per-file signing flow
 pe.cpp          PE parsing, Authenticode hash, checksum, signature injection
 der.cpp         DER/ASN.1 encoding primitives (build-and-wrap, no parsing)
 cms.cpp         CMS/Authenticode structure assembly (SignedData v1)
@@ -84,3 +85,12 @@ Platform-specific sources are selected by CMake generator expressions.
 - **Default TSA**: `http://timestamp.acs.microsoft.com/timestamping/RFC3161`
   (Microsoft's free service, colocated with Azure Trusted Signing).
   Plain HTTP -- integrity is guaranteed by the TSA's own signature.
+- **Concurrency**: `sign_one_file()` is called from worker threads
+  (default 8, tunable via `--max-parallel`).  All signing primitives
+  (`PeFile`, `azure_sign`, `tsa_timestamp`, `cms_*`) are per-instance or
+  create fresh TLS/TCP connections per call, with no shared mutable
+  state.  Per-file stderr output is buffered via `FileLogger` and
+  flushed as one block under a single mutex so concurrent file
+  narratives don't interleave.  Single-file invocations bypass the
+  worker pool entirely and write to `std::cerr` directly for identical
+  behavior to the pre-concurrency version.

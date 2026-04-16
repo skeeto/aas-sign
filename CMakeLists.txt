@@ -1,7 +1,9 @@
 cmake_minimum_required(VERSION 3.20)
 project(aas-sign LANGUAGES CXX C)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+find_package(Threads REQUIRED)
 
 include(FetchContent)
 
@@ -35,7 +37,7 @@ add_executable(aas-sign
   $<$<NOT:$<PLATFORM_ID:Windows>>:src/posix.cpp>
 )
 
-target_link_libraries(aas-sign PRIVATE nlohmann_json::nlohmann_json)
+target_link_libraries(aas-sign PRIVATE nlohmann_json::nlohmann_json Threads::Threads)
 
 if(WIN32)
   target_link_libraries(aas-sign PRIVATE winhttp bcrypt)

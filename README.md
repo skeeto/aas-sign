@@ -1,6 +1,6 @@
 # aas-sign: Azure Artifact Signing utility
 
-C++17 utility to code-sign PE images (EXE, DLL) via [Azure Artifact
+C++20 utility to code-sign PE images (EXE, DLL) via [Azure Artifact
 Signing][aas] with no local, private keys. It computes the Authenticode
 hash, sends it to Azure, timestamps the returned signature against an
 RFC 3161 TSA, and injects the signed CMS into the PE.
@@ -9,7 +9,7 @@ RFC 3161 TSA, and injects the signed CMS into the PE.
 
 ## Building
 
-CMake 3.20+, a C++17 compiler. Dependencies are fetched automatically.
+CMake 3.20+, a C++20 compiler. Dependencies are fetched automatically.
 
     $ cmake -B build
     $ cmake --build build
@@ -24,8 +24,9 @@ is fetched via FetchContent for TLS and SHA-256.
                --profile <profile> \
                --token <bearer-token> \
                [--timestamp-url <url> | --no-timestamp] \
+               [--max-parallel <N>] \
                [--dump-cms <path>] \
-               <file.exe|file.dll>
+               <file.exe|file.dll> [<file.exe|file.dll> ...]
 
 The token can also be set via `AZURE_ACCESS_TOKEN`.
 
@@ -41,7 +42,21 @@ Use `--timestamp-url` to point at a different RFC 3161 TSA, or
 production artifacts).
 
 `--dump-cms PATH` writes the raw DER-encoded CMS blob to a file for
-inspection (`openssl asn1parse -inform DER -in PATH`).
+inspection (`openssl asn1parse -inform DER -in PATH`).  Only supported
+when signing a single file.
+
+### Concurrency
+
+When multiple files are given, they are signed in parallel with up to 8
+in flight by default.  Use `--max-parallel N` to change the cap, or
+`--max-parallel 1` for fully sequential signing.  The Azure signing API
+is async and handles concurrent requests from the same token without
+trouble.
+
+In batch mode each file's progress output is prefixed with `[path]` and
+buffered, then flushed as a single block when that file finishes, so
+concurrent narratives don't interleave.  On completion the tool prints
+a summary and exits non-zero if any file failed.
 
 ### GitHub Actions
 
@@ -59,7 +74,7 @@ inspection (`openssl asn1parse -inform DER -in PATH`).
              --account myaccount \
              --profile myprofile \
              --token "$TOKEN" \
-             myapp.exe
+             myapp.exe myapp.dll installer.exe
 ```
 
 ## How it works
