@@ -24,12 +24,12 @@ static Bytes sha256_alg_id()
 }
 
 // SpcPeImageData: fixed bytes for flags=empty, file=SpcLink(SpcString("")).
-// SEQUENCE { BIT STRING 03 01 00, [0] EXPLICIT { [2] IMPLICIT { [0] IMPLICIT "" } } }
+// SEQUENCE { BIT STRING 03 01 00, [0] EXPLICIT { [2] EXPLICIT { [0] IMPLICIT "" } } }
 static Bytes spc_pe_image_data()
 {
-    // Innermost: [0] IMPLICIT BMPString "" -> 80 00
-    // Wrapped by SpcLink [2] (CHOICE => explicit): A2 02 80 00
-    // Wrapped by [0] EXPLICIT: A0 04 A2 02 80 00
+    // SpcString: [0] IMPLICIT BMPString "" -> 80 00
+    // SpcLink file: [2] EXPLICIT wrapping SpcString -> A2 02 80 00
+    // SpcPeImageData file: [0] EXPLICIT wrapper -> A0 04 A2 02 80 00
     // BIT STRING with empty content: 03 01 00
     static const uint8_t data[] = {
         0x30, 0x09,
@@ -58,9 +58,12 @@ static Bytes build_spc_indirect_data(const std::array<uint8_t, 32> &pe_hash)
 // Build the authenticated attributes SET (tag 0x31).
 static Bytes build_auth_attrs(const Bytes &spc_indirect_data)
 {
-    // Hash the SpcIndirectDataContent for the messageDigest attribute.
-    auto content_hash = platform::sha256(spc_indirect_data.data(),
-                                         spc_indirect_data.size());
+    // Authenticode messageDigest is SHA-256 of the CONTENT of the
+    // SpcIndirectDataContent SEQUENCE, not the SEQUENCE itself.  Skip the
+    // 2-byte DER header (tag 0x30 + short-form length; our content is always
+    // < 128 bytes so short-form applies).
+    auto content_hash = platform::sha256(spc_indirect_data.data() + 2,
+                                         spc_indirect_data.size() - 2);
 
     // Attribute 1: contentType = SPC_INDIRECT_DATA
     auto ct_oid = oid_content_type();
@@ -147,10 +150,11 @@ std::vector<uint8_t> cms_build_authenticode(
     auto eciContent = der_explicit(0, spc_idc);
     auto encap_content = der_sequence({&eciOid, &eciContent});
 
-    // Certificates [0] IMPLICIT: splice raw DER certs with context tag.
-    // The certificates field is [0] IMPLICIT SET, meaning tag 0xA0 + contents.
-    // Contents are the concatenated raw DER certs (no SET wrapping of inner items).
-    auto certs_wrapped = der_wrap(0xa0, certs_der.data(), certs_der.size());
+    // Certificates [0] IMPLICIT: concatenate individual cert DER blobs.
+    Bytes all_certs;
+    for (auto &c : certs)
+        all_certs.insert(all_certs.end(), c.begin(), c.end());
+    auto certs_wrapped = der_wrap(0xa0, all_certs.data(), all_certs.size());
 
     auto signer_infos = der_set({&signer_info});
 

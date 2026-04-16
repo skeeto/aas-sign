@@ -1,4 +1,5 @@
 #include "der.h"
+#include <algorithm>
 #include <stdexcept>
 
 static void write_length(Bytes &out, size_t len)
@@ -162,7 +163,19 @@ Bytes der_sequence(std::initializer_list<const Bytes *> parts)
 
 Bytes der_set(std::initializer_list<const Bytes *> parts)
 {
-    return der_wrap(DER_SET, parts);
+    // DER requires SET OF elements to be sorted lexicographically by their
+    // encoded bytes.  Sorting is harmless for single-element sets or for SET
+    // types where the schema order happens to match canonical order.
+    std::vector<const Bytes *> sorted(parts.begin(), parts.end());
+    std::sort(sorted.begin(), sorted.end(),
+              [](const Bytes *a, const Bytes *b) {
+                  return std::lexicographical_compare(
+                      a->begin(), a->end(), b->begin(), b->end());
+              });
+    Bytes content;
+    for (auto *p : sorted)
+        content.insert(content.end(), p->begin(), p->end());
+    return der_wrap(DER_SET, content);
 }
 
 Bytes der_explicit(unsigned tag_number, const Bytes &content)

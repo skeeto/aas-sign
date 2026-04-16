@@ -66,8 +66,13 @@ AzureSignResult azure_sign(const std::string &endpoint,
 
     AzureSignResult result;
     result.signature = base64_decode(body["signature"].get<std::string>());
-    result.cert_chain_der = base64_mime_decode(
+
+    // signingCertificate is double-encoded: the JSON value is base64-encoded
+    // PEM text, which itself is base64-encoded DER.  Decode both layers.
+    auto pem_bytes = base64_decode(
         body["signingCertificate"].get<std::string>());
+    std::string pem_text(pem_bytes.begin(), pem_bytes.end());
+    result.cert_chain_der = base64_mime_decode(pem_text);
 
     return result;
 }
