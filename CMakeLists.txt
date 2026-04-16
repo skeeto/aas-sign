@@ -8,9 +8,9 @@ find_package(Threads REQUIRED)
 include(FetchContent)
 
 FetchContent_Declare(json
-  GIT_REPOSITORY https://github.com/nlohmann/json.git
-  GIT_TAG        v3.11.3
-  GIT_SHALLOW    TRUE)
+  URL                     https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
+  URL_HASH                SHA256=d6c65aca6b1ed68e7a182f4757257b107ae403032760ed6ef121c9d55e81757d
+  DOWNLOAD_EXTRACT_TIMESTAMP FALSE)
 FetchContent_MakeAvailable(json)
 
 if(NOT WIN32)
@@ -18,9 +18,9 @@ if(NOT WIN32)
   set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
   set(MBEDTLS_AS_SUBPROJECT ON CACHE BOOL "" FORCE)
   FetchContent_Declare(mbedtls
-    GIT_REPOSITORY https://github.com/Mbed-TLS/mbedtls.git
-    GIT_TAG        v3.6.2
-    GIT_SHALLOW    TRUE)
+    URL                     https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.2/mbedtls-3.6.2.tar.bz2
+    URL_HASH                SHA256=8b54fb9bcf4d5a7078028e0520acddefb7900b3e66fec7f7175bb5b7d85ccdca
+    DOWNLOAD_EXTRACT_TIMESTAMP FALSE)
   FetchContent_MakeAvailable(mbedtls)
 endif()
 
