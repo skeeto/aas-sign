@@ -1,9 +1,8 @@
-# aas-sign
+# aas-sign: Azure Artifact Signing utility
 
-Signs PE images (EXE, DLL) via [Azure Artifact Signing][aas] (formerly
-Trusted Signing). No local private key needed -- the tool computes the
-Authenticode hash, sends it to Azure, and injects the returned signature
-into the PE.
+C++17 utility to code-sign PE images (EXE, DLL) via [Azure Artifact
+Signing][aas] wiht no local, private keys. It computes the Authenticode
+hash, sends it to Azure, and injects the returned signature into the PE.
 
 [aas]: https://learn.microsoft.com/en-us/azure/trusted-signing/
 
@@ -11,19 +10,19 @@ into the PE.
 
 CMake 3.20+, a C++17 compiler. Dependencies are fetched automatically.
 
-    cmake -B build
-    cmake --build build
+    $ cmake -B build
+    $ cmake --build build
 
 On Windows, only system APIs are used (BCrypt, WinHTTP). On POSIX, mbedTLS
 is fetched via FetchContent for TLS and SHA-256.
 
 ## Usage
 
-    aas-sign --endpoint <region>.codesigning.azure.net \
-             --account <account> \
-             --profile <profile> \
-             --token <bearer-token> \
-             <file.exe|file.dll>
+    $ aas-sign --endpoint <region>.codesigning.azure.net \
+               --account <account> \
+               --profile <profile> \
+               --token <bearer-token> \
+               <file.exe|file.dll>
 
 The token can also be set via `AZURE_ACCESS_TOKEN`.
 
@@ -39,7 +38,7 @@ The token can also be set via `AZURE_ACCESS_TOKEN`.
     TOKEN=$(az account get-access-token \
       --resource https://codesigning.azure.net \
       --query accessToken -o tsv)
-    aas-sign --endpoint weu.codesigning.azure.net \
+    aas-sign --endpoint eus.codesigning.azure.net \
              --account myaccount \
              --profile myprofile \
              --token "$TOKEN" \
