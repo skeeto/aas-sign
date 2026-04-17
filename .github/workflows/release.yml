@@ -37,9 +37,15 @@ jobs:
       - name: Build
         run: |
           set -euxo pipefail
+          # `-static` pulls libstdc++/libgcc/winpthreads into the binary;
+          # Windows system DLLs (kernel32, winhttp, bcrypt, shell32,
+          # UCRT redirectors) remain dynamic -- they ship with Windows.
+          # Result is a self-contained .exe that runs on any Windows
+          # host without MinGW runtime DLLs alongside.
           cmake -B build-mingw \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_TOOLCHAIN_FILE=cmake/x86_64-w64-mingw32.cmake
+            -DCMAKE_TOOLCHAIN_FILE=cmake/x86_64-w64-mingw32.cmake \
+            -DCMAKE_EXE_LINKER_FLAGS="-static"
           cmake --build build-mingw -j
           x86_64-w64-mingw32-strip build-mingw/aas-sign.exe
           mv build-mingw/aas-sign.exe aas-sign-windows-x86_64.exe
