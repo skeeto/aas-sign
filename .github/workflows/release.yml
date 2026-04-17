@@ -74,7 +74,7 @@ jobs:
         env:
           ENDPOINT: ${{ secrets.TRUSTED_SIGNING_ENDPOINT }}
           ACCOUNT:  ${{ secrets.TRUSTED_SIGNING_ACCOUNT }}
-          PROFILE:  ${{ secrets.TRUSTED_SIGNING_PROFILE }}
+          PROFILE:  ${{ secrets.CERTIFICATE_PROFILE }}
         run: |
           set -euo pipefail
           token="$(az account get-access-token \

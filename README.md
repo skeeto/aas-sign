@@ -124,7 +124,7 @@ Environment secrets):
 | `AZURE_SUBSCRIPTION_ID`    | Azure subscription                           |
 | `TRUSTED_SIGNING_ENDPOINT` | e.g. `eus.codesigning.azure.net`             |
 | `TRUSTED_SIGNING_ACCOUNT`  | Trusted Signing account name                 |
-| `TRUSTED_SIGNING_PROFILE`  | Certificate profile name                     |
+| `CERTIFICATE_PROFILE`      | Certificate profile name                     |
 
 The last three aren't strictly secrets (they're resource identifiers,
 not credentials), but GitHub's secrets namespace is convenient and
