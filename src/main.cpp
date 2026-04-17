@@ -21,14 +21,40 @@
 static const char DEFAULT_TSA_URL[] =
     "http://timestamp.acs.microsoft.com/timestamping/RFC3161";
 
-static void usage(const char *argv0)
+static void usage_short(std::ostream &os, const char *argv0)
 {
-    std::cerr << "usage: " << argv0
-              << " --endpoint HOST --account NAME --profile NAME"
-              << " [--token TOKEN] [--dump-cms FILE]"
-              << " [--timestamp-url URL | --no-timestamp]"
-              << " [--max-parallel N] FILE [FILE ...]\n"
-              << "       " << argv0 << " --version | --help\n";
+    os << "usage: " << argv0 << " [options] FILE [FILE ...]\n"
+       << "Try `" << argv0 << " --help' for more information.\n";
+}
+
+static void usage_full(const char *argv0)
+{
+    std::cout
+        << "usage: " << argv0 << " [options] FILE [FILE ...]\n"
+        << "       " << argv0 << " --version | --help\n"
+        << "\n"
+        << "Sign PE images (EXE, DLL) via Azure Artifact Signing "
+           "(Trusted Signing).\n"
+        << "\n"
+        << "Options:\n"
+        << "  --endpoint HOST      Azure Trusted Signing endpoint hostname,\n"
+        << "                       e.g. eus.codesigning.azure.net.  Required.\n"
+        << "  --account NAME       Trusted Signing account name.  Required.\n"
+        << "  --profile NAME       Certificate profile name.  Required.\n"
+        << "  --token TOKEN        Azure bearer token.  Falls back to the\n"
+        << "                       AZURE_ACCESS_TOKEN environment variable.\n"
+        << "  --timestamp-url URL  RFC 3161 timestamp authority.  Default is\n"
+        << "                       Microsoft's public TSA.  Use --no-timestamp\n"
+        << "                       to skip.\n"
+        << "  --no-timestamp       Skip timestamping.  Not recommended -- Azure\n"
+        << "                       Trusted Signing certs are short-lived (days).\n"
+        << "  --max-parallel N     Maximum concurrent sign operations when\n"
+        << "                       signing multiple files.  Default: 8.\n"
+        << "  --dump-cms FILE      Write raw CMS DER blob to FILE for debugging\n"
+        << "                       (openssl asn1parse -inform DER).  Single-file\n"
+        << "                       mode only.\n"
+        << "  --version            Print version and exit.\n"
+        << "  --help, -h           Print this help and exit.\n";
 }
 
 struct Config {
@@ -173,7 +199,7 @@ int aas_sign_main(int argc, char **argv)
         else if (!strcmp(argv[i], "--max-parallel") && i + 1 < argc)
             max_parallel = std::max(1, atoi(argv[++i]));
         else if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
-            usage(argv[0]);
+            usage_full(argv[0]);
             return 0;
         } else if (!strcmp(argv[i], "--version")) {
             std::cout << "aas-sign " << AAS_SIGN_VERSION << '\n';
@@ -182,7 +208,7 @@ int aas_sign_main(int argc, char **argv)
             files.push_back(argv[i]);
         else {
             std::cerr << "unknown option: " << argv[i] << '\n';
-            usage(argv[0]);
+            usage_short(std::cerr, argv[0]);
             return 1;
         }
     }
@@ -194,7 +220,7 @@ int aas_sign_main(int argc, char **argv)
 
     if (cfg.endpoint.empty() || cfg.account.empty() || cfg.profile.empty() ||
         cfg.token.empty() || files.empty()) {
-        usage(argv[0]);
+        usage_short(std::cerr, argv[0]);
         return 1;
     }
 
