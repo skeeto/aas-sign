@@ -20,9 +20,9 @@ APIs (BCrypt, WinHTTP). pthreads on POSIX, winpthreads on MinGW.
 
 ## Distribution
 
-`.github/action/action.yml` is a composite GitHub Action published from
-this same repo.  Consumers reference it as
-`skeeto/aas-sign/.github/action@<tag>`.  It downloads the pinned
+`action.yml` at the repo root is a composite GitHub Action published
+from this same repo.  Consumers reference it as
+`skeeto/aas-sign@<tag>`.  It downloads the pinned
 release binary for the runner OS, resolves an Azure token (either from
 the caller or via `az account get-access-token`), and invokes
 `aas-sign` with a multi-line `files:` input.  Asset naming convention:

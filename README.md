@@ -70,7 +70,7 @@ accepts one directly), and signs every file you list:
     client-id: ${{ secrets.AZURE_CLIENT_ID }}
     tenant-id: ${{ secrets.AZURE_TENANT_ID }}
     subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-- uses: skeeto/aas-sign/.github/action@v1
+- uses: skeeto/aas-sign@v1
   with:
     endpoint: eus.codesigning.azure.net
     account:  myaccount
