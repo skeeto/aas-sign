@@ -82,25 +82,39 @@ a summary and exits non-zero if any file failed.
 **While the standalone tool works, this GitHub Actions is not ready.**
 
 A composite action is published alongside the tool.  It installs the
-pinned release binary for the runner OS, fetches an Azure token (or
-accepts one directly), and signs every file you list:
+pinned release binary for the runner OS, performs the GitHub-Actions
+OIDC handshake to mint an Azure token, and signs every file you list.
+No `azure/login`, no Azure CLI on the runner:
 
 ```yaml
-- uses: azure/login@v2
-  with:
-    client-id: ${{ secrets.AZURE_CLIENT_ID }}
-    tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-    subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-- uses: skeeto/aas-sign@v0.1.0
-  with:
-    endpoint: eus.codesigning.azure.net
-    account:  myaccount
-    profile:  myprofile
-    files: |
-      dist/myapp.exe
-      dist/mylib.dll
-      dist/installer.exe
+permissions:
+  id-token: write      # required for GitHub OIDC federation
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - ...                         # your build steps here
+      - uses: skeeto/aas-sign@v0.1.0
+        with:
+          endpoint:  eus.codesigning.azure.net
+          account:   myaccount
+          profile:   myprofile
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          files: |
+            dist/myapp.exe
+            dist/mylib.dll
+            dist/installer.exe
 ```
+
+The Azure app registration for `client-id` must have a
+federated-credential configured to trust the caller repo/environment.
+See Microsoft's [workload identity federation docs][wif].
+
+[wif]: https://learn.microsoft.com/en-us/entra/workload-id/workload-identity-federation-create-trust?pivots=identity-wif-apps-methods-azp
 
 Inputs:
 
@@ -110,15 +124,17 @@ Inputs:
 | `account`       | yes      | —                                            | Trusted Signing account                |
 | `profile`       | yes      | —                                            | Certificate profile                    |
 | `files`         | yes      | —                                            | One path per line; blanks ignored      |
-| `token`         | no       | fetched via `az account get-access-token`    | Override bearer token                  |
+| `client-id`     | see note | —                                            | Azure app ID for OIDC                  |
+| `tenant-id`     | see note | —                                            | Azure tenant for OIDC                  |
+| `token`         | see note | —                                            | Pre-minted bearer (alternative to OIDC)|
 | `version`       | no       | `v0.1.0`                                     | aas-sign release to install            |
 | `timestamp-url` | no       | Microsoft ACS                                | Override RFC 3161 TSA                  |
 | `no-timestamp`  | no       | `false`                                      | Set `"true"` to skip timestamping      |
 | `max-parallel`  | no       | 8                                            | Concurrent sign operations             |
 
-If you aren't using `azure/login@v2`, pass the bearer token directly
-via `token:`.  Whichever form you use, the action masks the token in
-the runner log.
+Either provide `client-id` + `tenant-id` (preferred — no extra setup
+on the caller's side) or a pre-minted `token`.  When provided, `token`
+is masked in the log.
 
 ## Releases
 

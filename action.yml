@@ -14,8 +14,18 @@ inputs:
   files:
     description: Files to sign, one path per line
     required: true
+  client-id:
+    description: Azure app registration client ID (for GitHub OIDC federation).
+    required: false
+    default: ""
+  tenant-id:
+    description: Azure tenant ID (used with client-id for OIDC).
+    required: false
+    default: ""
   token:
-    description: Bearer token (optional; fetched via `az account get-access-token` if omitted)
+    description: |
+      Pre-minted Azure bearer token.  Usually omitted -- set client-id and
+      tenant-id instead and let aas-sign perform the OIDC exchange.
     required: false
     default: ""
   version:
@@ -71,25 +81,6 @@ runs:
         chmod +x "${dest}" || true   # no-op on Windows
         echo "${RUNNER_TEMP}" >> "${GITHUB_PATH}"
 
-    - name: Resolve Azure token
-      shell: bash
-      env:
-        INPUT_TOKEN: ${{ inputs.token }}
-      run: |
-        set -euo pipefail
-
-        if [ -n "${INPUT_TOKEN}" ]; then
-          token="${INPUT_TOKEN}"
-        else
-          token="$(az account get-access-token \
-                    --resource https://codesigning.azure.net \
-                    --query accessToken -o tsv)"
-        fi
-
-        # Mask the token in subsequent logs and export to later steps.
-        echo "::add-mask::${token}"
-        echo "AAS_SIGN_TOKEN=${token}" >> "${GITHUB_ENV}"
-
     - name: Sign
       shell: bash
       env:
@@ -97,6 +88,9 @@ runs:
         INPUT_ACCOUNT:       ${{ inputs.account }}
         INPUT_PROFILE:       ${{ inputs.profile }}
         INPUT_FILES:         ${{ inputs.files }}
+        INPUT_CLIENT_ID:     ${{ inputs.client-id }}
+        INPUT_TENANT_ID:     ${{ inputs.tenant-id }}
+        INPUT_TOKEN:         ${{ inputs.token }}
         INPUT_TIMESTAMP_URL: ${{ inputs.timestamp-url }}
         INPUT_NO_TIMESTAMP:  ${{ inputs.no-timestamp }}
         INPUT_MAX_PARALLEL:  ${{ inputs.max-parallel }}
@@ -106,7 +100,6 @@ runs:
         # Parse multi-line `files` input, trim whitespace, skip blanks.
         files=()
         while IFS= read -r line; do
-          # Trim leading/trailing whitespace with a portable sed.
           line="$(printf '%s' "${line}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
           [ -z "${line}" ] && continue
           files+=("${line}")
@@ -121,8 +114,23 @@ runs:
           --endpoint "${INPUT_ENDPOINT}"
           --account  "${INPUT_ACCOUNT}"
           --profile  "${INPUT_PROFILE}"
-          --token    "${AAS_SIGN_TOKEN}"
         )
+
+        # Auth: explicit token wins; otherwise use the OIDC flow which
+        # aas-sign implements directly against GitHub's id-token endpoint.
+        if [ -n "${INPUT_TOKEN}" ]; then
+          echo "::add-mask::${INPUT_TOKEN}"
+          args+=(--token "${INPUT_TOKEN}")
+        elif [ -n "${INPUT_CLIENT_ID}" ] && [ -n "${INPUT_TENANT_ID}" ]; then
+          args+=(
+            --oidc-client-id "${INPUT_CLIENT_ID}"
+            --oidc-tenant-id "${INPUT_TENANT_ID}"
+          )
+        else
+          echo "::error::aas-sign: must provide either token, or both client-id and tenant-id"
+          exit 1
+        fi
+
         if [ -n "${INPUT_TIMESTAMP_URL}" ]; then
           args+=(--timestamp-url "${INPUT_TIMESTAMP_URL}")
         fi
