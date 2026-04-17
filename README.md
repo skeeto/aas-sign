@@ -17,6 +17,27 @@ is fetched via FetchContent for TLS and SHA-256.
 
 ## Usage
 
+### Quick start
+
+Install the [Azure CLI][az-cli] if you don't have it, then:
+
+    $ az login                                            # once per shell
+    $ aas-sign --endpoint <region>.codesigning.azure.net \
+               --account <account>                       \
+               --profile <profile>                       \
+               --token "$(az account get-access-token    \
+                            --resource https://codesigning.azure.net \
+                            --query accessToken -o tsv)" \
+               myapp.exe
+
+Substitute your Trusted Signing region, account name, and certificate
+profile.  A successful run ends with `Signed myapp.exe successfully.`
+and the file is now Authenticode-signed and RFC 3161 timestamped.
+
+[az-cli]: https://learn.microsoft.com/en-us/cli/azure/install-azure-cli
+
+### Full synopsis
+
     $ aas-sign --endpoint <region>.codesigning.azure.net \
                --account <account> \
                --profile <profile> \
