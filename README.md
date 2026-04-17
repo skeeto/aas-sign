@@ -129,8 +129,8 @@ tag matching `v*`.
 
 The sign-and-release job runs under a GitHub Actions *environment*
 called `release`.  Create it at Settings → Environments → New
-environment → `release`, then add the secrets and variables there (not
-at the repository level).  Using an environment lets the Azure
+environment → `release`, then add the secrets there (not at the
+repository level).  Using an environment lets the Azure
 federated-credential binding match
 `repo:<owner>/<repo>:environment:release`, which is more stable than
 matching on tag refs.
@@ -142,7 +142,6 @@ Environment secrets):
 | -------------------------- | -------------------------------------------- |
 | `AZURE_CLIENT_ID`          | OIDC federated-identity app ID               |
 | `AZURE_TENANT_ID`          | Azure tenant                                 |
-| `AZURE_SUBSCRIPTION_ID`    | Azure subscription                           |
 | `TRUSTED_SIGNING_ENDPOINT` | e.g. `eus.codesigning.azure.net`             |
 | `TRUSTED_SIGNING_ACCOUNT`  | Trusted Signing account name                 |
 | `CERTIFICATE_PROFILE`      | Certificate profile name                     |
@@ -150,6 +149,13 @@ Environment secrets):
 The last three aren't strictly secrets (they're resource identifiers,
 not credentials), but GitHub's secrets namespace is convenient and
 auto-masks them in logs.
+
+`aas-sign` performs the OIDC-to-Azure-token exchange itself via its
+`--oidc-client-id` / `--oidc-tenant-id` flags (which read
+`AZURE_CLIENT_ID` / `AZURE_TENANT_ID` from the process environment as a
+fallback).  The release workflow sets those env vars from the secrets
+above and then invokes `aas-sign` directly — no `azure/login`, no
+Azure CLI on the runner, no `AZURE_SUBSCRIPTION_ID` needed.
 
 The Linux build uses `-static-libstdc++ -static-libgcc` (on top of
 dynamic glibc) so the binary survives future GitHub runner image

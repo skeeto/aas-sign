@@ -46,6 +46,7 @@ add_executable(aas-sign
   src/azure.cpp
   src/cms.cpp
   src/tsa.cpp
+  src/oidc.cpp
   $<$<PLATFORM_ID:Windows>:src/win32.cpp>
   $<$<PLATFORM_ID:Windows>:${CMAKE_CURRENT_BINARY_DIR}/aas-sign.rc>
   $<$<NOT:$<PLATFORM_ID:Windows>>:src/posix.cpp>

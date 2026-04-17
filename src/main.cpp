@@ -1,6 +1,7 @@
 #include "app.hpp"
 #include "azure.hpp"
 #include "cms.hpp"
+#include "oidc.hpp"
 #include "pe.hpp"
 #include "sha256.hpp"
 #include "tsa.hpp"
@@ -43,6 +44,13 @@ static void usage_full(const char *argv0)
         << "  --profile NAME       Certificate profile name.  Required.\n"
         << "  --token TOKEN        Azure bearer token.  Falls back to the\n"
         << "                       AZURE_ACCESS_TOKEN environment variable.\n"
+        << "  --oidc-client-id ID  Azure app client ID.  Combined with\n"
+        << "                       --oidc-tenant-id, mints a token from GitHub\n"
+        << "                       Actions OIDC federation (CI only; requires\n"
+        << "                       permissions: id-token: write).  Falls back\n"
+        << "                       to the AZURE_CLIENT_ID environment variable.\n"
+        << "  --oidc-tenant-id ID  Azure tenant ID for --oidc-client-id.\n"
+        << "                       Falls back to AZURE_TENANT_ID.\n"
         << "  --timestamp-url URL  RFC 3161 timestamp authority.  Default is\n"
         << "                       Microsoft's public TSA.  Use --no-timestamp\n"
         << "                       to skip.\n"
@@ -65,6 +73,11 @@ struct Config {
     std::string timestamp_url;
     bool no_timestamp = false;
     std::string dump_cms;  // valid only when signing a single file
+    // OIDC (CI-only) mode: when --token/$AZURE_ACCESS_TOKEN aren't set
+    // but both of these are, perform the GitHub-Actions OIDC flow to
+    // mint an Azure bearer.
+    std::string oidc_client_id;
+    std::string oidc_tenant_id;
 };
 
 struct SignResult {
@@ -190,6 +203,10 @@ int aas_sign_main(int argc, char **argv)
             cfg.profile = argv[++i];
         else if (!strcmp(argv[i], "--token") && i + 1 < argc)
             cfg.token = argv[++i];
+        else if (!strcmp(argv[i], "--oidc-client-id") && i + 1 < argc)
+            cfg.oidc_client_id = argv[++i];
+        else if (!strcmp(argv[i], "--oidc-tenant-id") && i + 1 < argc)
+            cfg.oidc_tenant_id = argv[++i];
         else if (!strcmp(argv[i], "--dump-cms") && i + 1 < argc)
             cfg.dump_cms = argv[++i];
         else if (!strcmp(argv[i], "--timestamp-url") && i + 1 < argc)
@@ -213,9 +230,34 @@ int aas_sign_main(int argc, char **argv)
         }
     }
 
+    // Token resolution, in order of precedence:
+    //   1. --token
+    //   2. $AZURE_ACCESS_TOKEN
+    //   3. OIDC (if --oidc-client-id + --oidc-tenant-id, or their env
+    //      fallbacks AZURE_CLIENT_ID/AZURE_TENANT_ID, are set AND the
+    //      runner has injected the id-token endpoint)
     if (cfg.token.empty()) {
-        const char *env = getenv("AZURE_ACCESS_TOKEN");
-        if (env) cfg.token = env;
+        if (const char *env = getenv("AZURE_ACCESS_TOKEN"))
+            cfg.token = env;
+    }
+    if (cfg.oidc_client_id.empty())
+        if (const char *env = getenv("AZURE_CLIENT_ID"))
+            cfg.oidc_client_id = env;
+    if (cfg.oidc_tenant_id.empty())
+        if (const char *env = getenv("AZURE_TENANT_ID"))
+            cfg.oidc_tenant_id = env;
+
+    if (cfg.token.empty() &&
+        !cfg.oidc_client_id.empty() && !cfg.oidc_tenant_id.empty()) {
+        std::cerr << "Fetching Azure token via GitHub OIDC federation...\n";
+        try {
+            cfg.token = oidc_fetch_azure_token(oidc_runtime(),
+                                               cfg.oidc_client_id,
+                                               cfg.oidc_tenant_id);
+        } catch (const std::exception &e) {
+            std::cerr << "error: " << e.what() << '\n';
+            return 1;
+        }
     }
 
     {
@@ -229,7 +271,9 @@ int aas_sign_main(int argc, char **argv)
         require(!cfg.endpoint.empty(), "--endpoint");
         require(!cfg.account.empty(),  "--account");
         require(!cfg.profile.empty(),  "--profile");
-        require(!cfg.token.empty(),    "--token (or $AZURE_ACCESS_TOKEN)");
+        require(!cfg.token.empty(),
+                "--token (or $AZURE_ACCESS_TOKEN, "
+                "or --oidc-client-id + --oidc-tenant-id in a runner)");
         require(!files.empty(),        "input file");
         if (!ok) {
             usage_short(std::cerr, argv[0]);

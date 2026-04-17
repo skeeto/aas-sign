@@ -186,6 +186,121 @@ HttpResponse https_get(const std::string &host, const std::string &path,
     return winhttp_request(host, path, bearer_token, "GET", nullptr);
 }
 
+// Parse an https URL via WinHttpCrackUrl.  Populates host and
+// path (including any query string).  Throws on non-https or malformed
+// input.
+static void parse_https_url(const std::string &url,
+                            std::wstring &host, std::wstring &path_and_query)
+{
+    auto wurl = to_wide(url);
+    URL_COMPONENTS uc{};
+    uc.dwStructSize = sizeof(uc);
+    uc.dwHostNameLength  = DWORD(-1);
+    uc.dwUrlPathLength   = DWORD(-1);
+    uc.dwExtraInfoLength = DWORD(-1);
+    uc.dwSchemeLength    = DWORD(-1);
+    if (!WinHttpCrackUrl(wurl.c_str(), DWORD(wurl.size()), 0, &uc))
+        throw std::runtime_error("WinHttpCrackUrl failed on URL: " + url);
+    if (uc.nScheme != INTERNET_SCHEME_HTTPS)
+        throw std::runtime_error("expected https:// URL, got: " + url);
+    host.assign(uc.lpszHostName, uc.dwHostNameLength);
+    path_and_query.assign(uc.lpszUrlPath, uc.dwUrlPathLength);
+    if (uc.dwExtraInfoLength)
+        path_and_query.append(uc.lpszExtraInfo, uc.dwExtraInfoLength);
+    if (path_and_query.empty()) path_and_query = L"/";
+}
+
+static HttpResponse winhttp_url_request(const std::string &url,
+                                        const wchar_t *method,
+                                        const std::string *bearer_token,
+                                        const std::string *content_type,
+                                        const std::string *body)
+{
+    std::wstring whost, wpath;
+    parse_https_url(url, whost, wpath);
+
+    HINTERNET session = WinHttpOpen(L"aas-sign/1.0",
+                                   WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+                                   WINHTTP_NO_PROXY_NAME,
+                                   WINHTTP_NO_PROXY_BYPASS, 0);
+    if (!session) throw std::runtime_error("WinHttpOpen failed");
+
+    HINTERNET conn = WinHttpConnect(session, whost.c_str(),
+                                   INTERNET_DEFAULT_HTTPS_PORT, 0);
+    if (!conn) {
+        WinHttpCloseHandle(session);
+        throw std::runtime_error("WinHttpConnect failed");
+    }
+
+    HINTERNET req = WinHttpOpenRequest(conn, method, wpath.c_str(),
+                                       nullptr, WINHTTP_NO_REFERER,
+                                       WINHTTP_DEFAULT_ACCEPT_TYPES,
+                                       WINHTTP_FLAG_SECURE);
+    if (!req) {
+        WinHttpCloseHandle(conn);
+        WinHttpCloseHandle(session);
+        throw std::runtime_error("WinHttpOpenRequest failed");
+    }
+
+    if (bearer_token) {
+        std::wstring hdr = L"Authorization: Bearer " + to_wide(*bearer_token);
+        WinHttpAddRequestHeaders(req, hdr.c_str(), DWORD(-1),
+                                 WINHTTP_ADDREQ_FLAG_ADD);
+    }
+    if (content_type) {
+        std::wstring hdr = L"Content-Type: " + to_wide(*content_type);
+        WinHttpAddRequestHeaders(req, hdr.c_str(), DWORD(-1),
+                                 WINHTTP_ADDREQ_FLAG_ADD);
+    }
+
+    BOOL ok = WinHttpSendRequest(req,
+                                 WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+                                 body ? (LPVOID)body->data() : WINHTTP_NO_REQUEST_DATA,
+                                 body ? (DWORD)body->size() : 0,
+                                 body ? (DWORD)body->size() : 0,
+                                 0);
+    if (!ok || !WinHttpReceiveResponse(req, nullptr)) {
+        WinHttpCloseHandle(req);
+        WinHttpCloseHandle(conn);
+        WinHttpCloseHandle(session);
+        throw std::runtime_error("WinHttp request failed");
+    }
+
+    DWORD status = 0, status_size = sizeof(status);
+    WinHttpQueryHeaders(req,
+                       WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                       WINHTTP_HEADER_NAME_BY_INDEX,
+                       &status, &status_size, WINHTTP_NO_HEADER_INDEX);
+
+    std::string response_body;
+    DWORD avail = 0;
+    while (WinHttpQueryDataAvailable(req, &avail) && avail) {
+        std::vector<char> buf(avail);
+        DWORD got = 0;
+        WinHttpReadData(req, buf.data(), avail, &got);
+        response_body.append(buf.data(), got);
+    }
+
+    WinHttpCloseHandle(req);
+    WinHttpCloseHandle(conn);
+    WinHttpCloseHandle(session);
+
+    return {static_cast<int>(status), response_body};
+}
+
+HttpResponse https_get_url(const std::string &url,
+                           const std::string &bearer_token)
+{
+    return winhttp_url_request(url, L"GET", &bearer_token, nullptr, nullptr);
+}
+
+HttpResponse https_post_url(const std::string &url,
+                            const std::string &content_type,
+                            const std::string &body)
+{
+    return winhttp_url_request(url, L"POST", nullptr, &content_type, &body);
+}
+
 HttpResponse http_post_binary(const std::string &host, int port,
                               const std::string &path,
                               const std::string &content_type,

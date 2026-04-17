@@ -250,6 +250,67 @@ HttpResponse https_get(const std::string &host, const std::string &path,
     return do_request(host, "GET", path, bearer_token, nullptr);
 }
 
+// Parse "https://host[:port]/path?query" into components.  The port is
+// ignored (TlsConnection hardcodes 443) since every endpoint we speak
+// to HTTPS on is on the default port.
+static void parse_https_url(const std::string &url,
+                            std::string &host, std::string &path_and_query)
+{
+    const std::string scheme = "https://";
+    if (url.compare(0, scheme.size(), scheme) != 0)
+        throw std::runtime_error("expected https:// URL, got: " + url);
+    size_t host_start = scheme.size();
+    size_t path_start = url.find('/', host_start);
+    host = (path_start == std::string::npos)
+        ? url.substr(host_start)
+        : url.substr(host_start, path_start - host_start);
+    path_and_query = (path_start == std::string::npos)
+        ? "/" : url.substr(path_start);
+    // If host carries a :port suffix we just drop it (we always hit 443).
+    auto colon = host.find(':');
+    if (colon != std::string::npos)
+        host.erase(colon);
+}
+
+HttpResponse https_get_url(const std::string &url,
+                           const std::string &bearer_token)
+{
+    std::string host, path;
+    parse_https_url(url, host, path);
+
+    TlsConnection conn(host);
+    std::ostringstream req;
+    req << "GET " << path << " HTTP/1.1\r\n"
+        << "Host: " << host << "\r\n"
+        << "User-Agent: aas-sign/1.0\r\n"
+        << "Accept: application/json\r\n"
+        << "Authorization: Bearer " << bearer_token << "\r\n"
+        << "Connection: close\r\n\r\n";
+    conn.write_all(req.str());
+    return parse_http_response(conn.read_all());
+}
+
+HttpResponse https_post_url(const std::string &url,
+                            const std::string &content_type,
+                            const std::string &body)
+{
+    std::string host, path;
+    parse_https_url(url, host, path);
+
+    TlsConnection conn(host);
+    std::ostringstream req;
+    req << "POST " << path << " HTTP/1.1\r\n"
+        << "Host: " << host << "\r\n"
+        << "User-Agent: aas-sign/1.0\r\n"
+        << "Accept: application/json\r\n"
+        << "Content-Type: " << content_type << "\r\n"
+        << "Content-Length: " << body.size() << "\r\n"
+        << "Connection: close\r\n\r\n"
+        << body;
+    conn.write_all(req.str());
+    return parse_http_response(conn.read_all());
+}
+
 HttpResponse http_post_binary(const std::string &host, int port,
                               const std::string &path,
                               const std::string &content_type,

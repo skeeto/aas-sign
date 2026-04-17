@@ -64,28 +64,19 @@ jobs:
       - name: Make linux binary executable
         run: chmod +x aas-sign-linux-x86_64
 
-      - uses: azure/login@v2
-        with:
-          client-id:       ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id:       ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
       - name: Self-sign Windows binary
         env:
-          ENDPOINT: ${{ secrets.TRUSTED_SIGNING_ENDPOINT }}
-          ACCOUNT:  ${{ secrets.TRUSTED_SIGNING_ACCOUNT }}
-          PROFILE:  ${{ secrets.CERTIFICATE_PROFILE }}
+          ENDPOINT:         ${{ secrets.TRUSTED_SIGNING_ENDPOINT }}
+          ACCOUNT:          ${{ secrets.TRUSTED_SIGNING_ACCOUNT }}
+          PROFILE:          ${{ secrets.CERTIFICATE_PROFILE }}
+          AZURE_CLIENT_ID:  ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID:  ${{ secrets.AZURE_TENANT_ID }}
         run: |
           set -euo pipefail
-          token="$(az account get-access-token \
-                    --resource https://codesigning.azure.net \
-                    --query accessToken -o tsv)"
-          echo "::add-mask::${token}"
           ./aas-sign-linux-x86_64 \
             --endpoint "${ENDPOINT}" \
             --account  "${ACCOUNT}" \
             --profile  "${PROFILE}" \
-            --token    "${token}" \
             aas-sign-windows-x86_64.exe
 
       - name: Compute checksums

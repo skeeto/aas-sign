@@ -39,6 +39,16 @@ HttpResponse http_post_binary(const std::string &host, int port,
                               const std::string &accept,
                               const std::vector<uint8_t> &body);
 
+// HTTPS helpers that take a full URL.  Used by the OIDC flow, where one
+// endpoint comes from runner-injected env vars and the other is a
+// Microsoft login URL parameterised by tenant ID.
+HttpResponse https_get_url(const std::string &url,
+                           const std::string &bearer_token);
+
+HttpResponse https_post_url(const std::string &url,
+                            const std::string &content_type,
+                            const std::string &body);
+
 // 64-bit-offset file I/O with checked error handling.  Paths are UTF-8
 // on all platforms (transcoded to UTF-16 for Windows CreateFileW).
 // Every method throws std::runtime_error on error or short transfer.
