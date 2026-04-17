@@ -1,5 +1,5 @@
-#include "x509.h"
-#include "narrow.h"
+#include "x509.hpp"
+#include "narrow.hpp"
 #include <cstring>
 #include <stdexcept>
 

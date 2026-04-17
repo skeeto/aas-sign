@@ -1,7 +1,7 @@
-#include "tsa.h"
-#include "der.h"
-#include "sha256.h"
-#include "x509.h"
+#include "tsa.hpp"
+#include "der.hpp"
+#include "sha256.hpp"
+#include "x509.hpp"
 
 #include <chrono>
 #include <random>

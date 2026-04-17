@@ -1,7 +1,7 @@
-#include "cms.h"
-#include "der.h"
-#include "sha256.h"
-#include "x509.h"
+#include "cms.hpp"
+#include "der.hpp"
+#include "sha256.hpp"
+#include "x509.hpp"
 #include <stdexcept>
 
 // Well-known OIDs.

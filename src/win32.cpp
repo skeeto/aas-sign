@@ -1,5 +1,5 @@
-#include "app.h"
-#include "sha256.h"
+#include "app.hpp"
+#include "sha256.hpp"
 
 #ifdef _WIN32
 

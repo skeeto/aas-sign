@@ -1,9 +1,9 @@
-#include "app.h"
-#include "azure.h"
-#include "cms.h"
-#include "pe.h"
-#include "sha256.h"
-#include "tsa.h"
+#include "app.hpp"
+#include "azure.hpp"
+#include "cms.hpp"
+#include "pe.hpp"
+#include "sha256.hpp"
+#include "tsa.hpp"
 
 #include <algorithm>
 #include <atomic>

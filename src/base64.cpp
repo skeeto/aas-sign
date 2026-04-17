@@ -1,5 +1,5 @@
-#include "base64.h"
-#include "narrow.h"
+#include "base64.hpp"
+#include "narrow.hpp"
 
 static const char table[] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";

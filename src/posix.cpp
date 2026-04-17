@@ -1,6 +1,6 @@
-#include "app.h"
-#include "narrow.h"
-#include "sha256.h"
+#include "app.hpp"
+#include "narrow.hpp"
+#include "sha256.hpp"
 
 #include <mbedtls/sha256.h>
 #include <mbedtls/net_sockets.h>

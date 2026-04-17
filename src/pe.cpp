@@ -1,6 +1,6 @@
-#include "pe.h"
-#include "narrow.h"
-#include "sha256.h"
+#include "pe.hpp"
+#include "narrow.hpp"
+#include "sha256.hpp"
 #include <algorithm>
 #include <cstring>
 #include <stdexcept>

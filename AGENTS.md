@@ -39,7 +39,7 @@ x509.cpp        Minimal X.509 parser (issuer DN + serial, CMS cert splitting)
 azure.cpp       Azure Trusted Signing REST client (POST + poll loop)
 tsa.cpp         RFC 3161 TimeStampReq builder and TimeStampResp parser
 base64.cpp      Base64 encode/decode
-sha256.h        Platform abstraction interface (SHA-256, HTTPS, plain HTTP)
+sha256.hpp      Platform abstraction interface (SHA-256, HTTPS, plain HTTP, File)
 posix.cpp       POSIX impl: mbedTLS SHA-256, raw TLS HTTPS, TCP socket HTTP
 win32.cpp       Windows impl: BCrypt SHA-256, WinHTTP (TLS + plain)
 ```
