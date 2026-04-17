@@ -51,7 +51,7 @@ static Bytes build_tsp_request(const std::array<uint8_t, 32> &hash,
     auto imprint = der_sequence({&hash_alg, &hashed});
 
     //  nonce          INTEGER OPTIONAL,
-    auto nonce_int = der_integer(long(nonce));
+    auto nonce_int = der_integer(nonce);
 
     //  certReq        BOOLEAN DEFAULT FALSE,
     auto cert_req = der_boolean(true);

@@ -13,10 +13,6 @@
 #include <string>
 #include <vector>
 
-#pragma comment(lib, "bcrypt.lib")
-#pragma comment(lib, "winhttp.lib")
-#pragma comment(lib, "shell32.lib")
-
 namespace platform {
 
 Sha256::Sha256()

@@ -1,4 +1,5 @@
 #include "app.h"
+#include "narrow.h"
 #include "sha256.h"
 
 #include <mbedtls/sha256.h>
@@ -150,7 +151,7 @@ struct TlsConnection {
                 throw std::runtime_error("ssl_write: " + mbed_error(ret));
             }
             p += ret;
-            remaining -= ret;
+            remaining -= narrow<size_t>(ret);
         }
     }
 
@@ -165,7 +166,7 @@ struct TlsConnection {
                 break;
             if (ret < 0)
                 throw std::runtime_error("ssl_read: " + mbed_error(ret));
-            result.append(reinterpret_cast<char *>(buf), ret);
+            result.append(reinterpret_cast<char *>(buf), narrow<size_t>(ret));
         }
         return result;
     }

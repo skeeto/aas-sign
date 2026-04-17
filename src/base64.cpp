@@ -1,4 +1,5 @@
 #include "base64.h"
+#include "narrow.h"
 
 static const char table[] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -38,7 +39,7 @@ std::vector<uint8_t> base64_decode(const std::string &s)
     for (char c : s) {
         int v = decode_char(c);
         if (v < 0) continue;
-        accum = (accum << 6) | v;
+        accum = (accum << 6) | narrow<uint32_t>(v);
         bits += 6;
         if (bits >= 8) {
             bits -= 8;

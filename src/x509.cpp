@@ -1,4 +1,5 @@
 #include "x509.h"
+#include "narrow.h"
 #include <cstring>
 #include <stdexcept>
 
@@ -17,7 +18,7 @@ TlvView der_read_tlv(const uint8_t *data, size_t len)
     } else {
         int nbytes = data[pos] & 0x7f;
         pos++;
-        if (nbytes == 0 || nbytes > 4 || pos + nbytes > len)
+        if (nbytes == 0 || nbytes > 4 || pos + narrow<size_t>(nbytes) > len)
             throw std::runtime_error("invalid DER length");
         v.content_len = 0;
         for (int i = 0; i < nbytes; i++)

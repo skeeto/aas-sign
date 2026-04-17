@@ -1,4 +1,5 @@
 #include "pe.h"
+#include "narrow.h"
 #include "sha256.h"
 #include <algorithm>
 #include <cstring>
@@ -87,7 +88,7 @@ std::array<uint8_t, 32> PeFile::authenticode_hash()
         // Region 3: after cert entry to end of file.
         hash_range(after_entry, fsize);
         // Pad to 8-byte boundary.
-        int pad = int((8 - fsize % 8) % 8);
+        size_t pad = size_t((8 - fsize % 8) % 8);
         if (pad > 0) {
             uint8_t zeros[8] = {};
             hash.update(zeros, pad);
@@ -217,7 +218,8 @@ uint16_t PeFile::read_le16(uint64_t offset)
 {
     uint8_t b[2];
     read_at(offset, b, 2);
-    return uint16_t(b[0]) | (uint16_t(b[1]) << 8);
+    // Compute in unsigned to avoid int promotion, narrow once at the end.
+    return narrow<uint16_t>(uint32_t(b[0]) | (uint32_t(b[1]) << 8));
 }
 
 void PeFile::write_le32(uint64_t offset, uint32_t val)

@@ -39,6 +39,10 @@ add_executable(aas-sign
 
 target_link_libraries(aas-sign PRIVATE nlohmann_json::nlohmann_json Threads::Threads)
 
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  target_compile_options(aas-sign PRIVATE -Wall -Wconversion)
+endif()
+
 if(WIN32)
   target_link_libraries(aas-sign PRIVATE winhttp bcrypt shell32)
 else()

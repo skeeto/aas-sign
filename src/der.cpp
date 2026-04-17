@@ -74,7 +74,7 @@ Bytes der_integer(const uint8_t *data, size_t len)
     return der_wrap(0x02, data, len);
 }
 
-Bytes der_integer(long value)
+Bytes der_integer(int64_t value)
 {
     if (value < 0)
         throw std::runtime_error("negative integers not supported");
@@ -85,17 +85,17 @@ Bytes der_integer(long value)
         buf[0] = 0;
         n = 1;
     } else {
-        long v = value;
+        uint64_t v = uint64_t(value);
         // Find number of bytes needed.
         int nbytes = 0;
-        for (long tmp = v; tmp > 0; tmp >>= 8) nbytes++;
+        for (uint64_t tmp = v; tmp > 0; tmp >>= 8) nbytes++;
         n = nbytes;
         for (int i = nbytes - 1; i >= 0; i--) {
             buf[i] = uint8_t(v & 0xff);
             v >>= 8;
         }
     }
-    return der_integer(buf, n);
+    return der_integer(buf, size_t(n));
 }
 
 Bytes der_oid(const char *dotted)

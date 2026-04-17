@@ -18,7 +18,7 @@ Bytes der_cat(std::initializer_list<const Bytes *> parts);
 
 // Primitive types.
 Bytes der_integer(const uint8_t *data, size_t len);
-Bytes der_integer(long value);
+Bytes der_integer(int64_t value);
 Bytes der_oid(const char *dotted);
 Bytes der_octet_string(const uint8_t *data, size_t len);
 Bytes der_octet_string(const Bytes &data);
