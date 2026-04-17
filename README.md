@@ -97,7 +97,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - ...                         # your build steps here
-      - uses: skeeto/aas-sign@v0.1.0
+      - uses: skeeto/aas-sign@v0.2.0
         with:
           endpoint:  eus.codesigning.azure.net
           account:   myaccount
@@ -127,7 +127,7 @@ Inputs:
 | `client-id`     | see note | —                                            | Azure app ID for OIDC                  |
 | `tenant-id`     | see note | —                                            | Azure tenant for OIDC                  |
 | `token`         | see note | —                                            | Pre-minted bearer (alternative to OIDC)|
-| `version`       | no       | `v0.1.0`                                     | aas-sign release to install            |
+| `version`       | no       | `v0.2.0`                                     | aas-sign release to install            |
 | `timestamp-url` | no       | Microsoft ACS                                | Override RFC 3161 TSA                  |
 | `no-timestamp`  | no       | `false`                                      | Set `"true"` to skip timestamping      |
 | `max-parallel`  | no       | 8                                            | Concurrent sign operations             |

@@ -31,7 +31,7 @@ inputs:
   version:
     description: aas-sign release tag to install
     required: false
-    default: v0.1.0
+    default: v0.2.0
   timestamp-url:
     description: RFC 3161 TSA URL (overrides aas-sign's built-in default)
     required: false
