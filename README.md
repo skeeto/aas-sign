@@ -112,6 +112,10 @@ The Azure app registration for `client-id` must have a
 federated-credential configured to trust the caller repo/environment.
 See Microsoft's [workload identity federation docs][wif].
 
+The [dcmake project uses this action][dcmake] in its build pipeline, which
+can serve as a working example.
+
+[dcmake]: https://github.com/skeeto/dcmake/blob/master/.github/workflows/release.yml
 [wif]: https://learn.microsoft.com/en-us/entra/workload-id/workload-identity-federation-create-trust?pivots=identity-wif-apps-methods-azp
 
 Inputs:
