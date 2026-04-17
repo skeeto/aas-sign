@@ -60,22 +60,44 @@ a summary and exits non-zero if any file failed.
 
 ### GitHub Actions
 
+A composite action is published alongside the tool.  It installs the
+pinned release binary for the runner OS, fetches an Azure token (or
+accepts one directly), and signs every file you list:
+
 ```yaml
 - uses: azure/login@v2
   with:
     client-id: ${{ secrets.AZURE_CLIENT_ID }}
     tenant-id: ${{ secrets.AZURE_TENANT_ID }}
     subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-- run: |
-    TOKEN=$(az account get-access-token \
-      --resource https://codesigning.azure.net \
-      --query accessToken -o tsv)
-    aas-sign --endpoint eus.codesigning.azure.net \
-             --account myaccount \
-             --profile myprofile \
-             --token "$TOKEN" \
-             myapp.exe myapp.dll installer.exe
+- uses: skeeto/aas-sign/.github/action@v1
+  with:
+    endpoint: eus.codesigning.azure.net
+    account:  myaccount
+    profile:  myprofile
+    files: |
+      dist/myapp.exe
+      dist/mylib.dll
+      dist/installer.exe
 ```
+
+Inputs:
+
+| Input           | Required | Default                                      | Notes                                  |
+| --------------- | -------- | -------------------------------------------- | -------------------------------------- |
+| `endpoint`      | yes      | —                                            | Trusted Signing endpoint host          |
+| `account`       | yes      | —                                            | Trusted Signing account                |
+| `profile`       | yes      | —                                            | Certificate profile                    |
+| `files`         | yes      | —                                            | One path per line; blanks ignored      |
+| `token`         | no       | fetched via `az account get-access-token`    | Override bearer token                  |
+| `version`       | no       | `v0.1.0`                                     | aas-sign release to install            |
+| `timestamp-url` | no       | Microsoft ACS                                | Override RFC 3161 TSA                  |
+| `no-timestamp`  | no       | `false`                                      | Set `"true"` to skip timestamping      |
+| `max-parallel`  | no       | 8                                            | Concurrent sign operations             |
+
+If you aren't using `azure/login@v2`, pass the bearer token directly
+via `token:`.  Whichever form you use, the action masks the token in
+the runner log.
 
 ## How it works
 

@@ -18,6 +18,16 @@ C++20 (needed for `std::jthread`). Dependencies fetched via CMake
 FetchContent (nlohmann/json, mbedTLS on POSIX). Windows uses only system
 APIs (BCrypt, WinHTTP). pthreads on POSIX, winpthreads on MinGW.
 
+## Distribution
+
+`.github/action/action.yml` is a composite GitHub Action published from
+this same repo.  Consumers reference it as
+`skeeto/aas-sign/.github/action@<tag>`.  It downloads the pinned
+release binary for the runner OS, resolves an Azure token (either from
+the caller or via `az account get-access-token`), and invokes
+`aas-sign` with a multi-line `files:` input.  Asset naming convention:
+`aas-sign-{linux,windows,macos}-{x86_64,universal}[.exe]`.
+
 ## Architecture
 
 ```

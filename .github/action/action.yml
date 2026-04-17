@@ -1,0 +1,136 @@
+name: aas-sign
+description: Sign PE images with Azure Artifact Signing (formerly Trusted Signing)
+
+inputs:
+  endpoint:
+    description: Azure Trusted Signing endpoint host (e.g. eus.codesigning.azure.net)
+    required: true
+  account:
+    description: Trusted Signing account name
+    required: true
+  profile:
+    description: Certificate profile name
+    required: true
+  files:
+    description: Files to sign, one path per line
+    required: true
+  token:
+    description: Bearer token (optional; fetched via `az account get-access-token` if omitted)
+    required: false
+    default: ""
+  version:
+    description: aas-sign release tag to install
+    required: false
+    default: v0.1.0
+  timestamp-url:
+    description: RFC 3161 TSA URL (overrides aas-sign's built-in default)
+    required: false
+    default: ""
+  no-timestamp:
+    description: Set to "true" to skip timestamping
+    required: false
+    default: "false"
+  max-parallel:
+    description: Maximum concurrent signing operations
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Install aas-sign
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+
+        case "${RUNNER_OS}" in
+          Linux)
+            asset=aas-sign-linux-x86_64
+            exe=aas-sign
+            ;;
+          Windows)
+            asset=aas-sign-windows-x86_64.exe
+            exe=aas-sign.exe
+            ;;
+          macOS)
+            asset=aas-sign-macos-universal
+            exe=aas-sign
+            ;;
+          *)
+            echo "::error::unsupported RUNNER_OS: ${RUNNER_OS}"
+            exit 1
+            ;;
+        esac
+
+        url="https://github.com/skeeto/aas-sign/releases/download/${VERSION}/${asset}"
+        dest="${RUNNER_TEMP}/${exe}"
+        echo "Installing aas-sign ${VERSION} from ${url}"
+        curl -fsSL --retry 3 --retry-all-errors -o "${dest}" "${url}"
+        chmod +x "${dest}" || true   # no-op on Windows
+        echo "${RUNNER_TEMP}" >> "${GITHUB_PATH}"
+
+    - name: Resolve Azure token
+      shell: bash
+      env:
+        INPUT_TOKEN: ${{ inputs.token }}
+      run: |
+        set -euo pipefail
+
+        if [ -n "${INPUT_TOKEN}" ]; then
+          token="${INPUT_TOKEN}"
+        else
+          token="$(az account get-access-token \
+                    --resource https://codesigning.azure.net \
+                    --query accessToken -o tsv)"
+        fi
+
+        # Mask the token in subsequent logs and export to later steps.
+        echo "::add-mask::${token}"
+        echo "AAS_SIGN_TOKEN=${token}" >> "${GITHUB_ENV}"
+
+    - name: Sign
+      shell: bash
+      env:
+        INPUT_ENDPOINT:      ${{ inputs.endpoint }}
+        INPUT_ACCOUNT:       ${{ inputs.account }}
+        INPUT_PROFILE:       ${{ inputs.profile }}
+        INPUT_FILES:         ${{ inputs.files }}
+        INPUT_TIMESTAMP_URL: ${{ inputs.timestamp-url }}
+        INPUT_NO_TIMESTAMP:  ${{ inputs.no-timestamp }}
+        INPUT_MAX_PARALLEL:  ${{ inputs.max-parallel }}
+      run: |
+        set -euo pipefail
+
+        # Parse multi-line `files` input, trim whitespace, skip blanks.
+        files=()
+        while IFS= read -r line; do
+          # Trim leading/trailing whitespace with a portable sed.
+          line="$(printf '%s' "${line}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+          [ -z "${line}" ] && continue
+          files+=("${line}")
+        done <<< "${INPUT_FILES}"
+
+        if [ ${#files[@]} -eq 0 ]; then
+          echo "::error::aas-sign: no files provided"
+          exit 1
+        fi
+
+        args=(
+          --endpoint "${INPUT_ENDPOINT}"
+          --account  "${INPUT_ACCOUNT}"
+          --profile  "${INPUT_PROFILE}"
+          --token    "${AAS_SIGN_TOKEN}"
+        )
+        if [ -n "${INPUT_TIMESTAMP_URL}" ]; then
+          args+=(--timestamp-url "${INPUT_TIMESTAMP_URL}")
+        fi
+        if [ "${INPUT_NO_TIMESTAMP}" = "true" ]; then
+          args+=(--no-timestamp)
+        fi
+        if [ -n "${INPUT_MAX_PARALLEL}" ]; then
+          args+=(--max-parallel "${INPUT_MAX_PARALLEL}")
+        fi
+
+        aas-sign "${args[@]}" "${files[@]}"
