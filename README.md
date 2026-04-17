@@ -99,6 +99,37 @@ If you aren't using `azure/login@v2`, pass the bearer token directly
 via `token:`.  Whichever form you use, the action masks the token in
 the runner log.
 
+## Releases
+
+`.github/workflows/release.yml` builds Linux and Windows binaries,
+self-signs the Windows one with the freshly-built Linux one, and
+publishes a GitHub release with checksums.  Triggered by pushing a
+tag matching `v*`.
+
+Required repository configuration (Settings → Secrets and variables
+→ Actions):
+
+| Kind   | Name                       | Purpose                                  |
+| ------ | -------------------------- | ---------------------------------------- |
+| secret | `AZURE_CLIENT_ID`          | OIDC federated-identity app ID           |
+| secret | `AZURE_TENANT_ID`          | Azure tenant                             |
+| secret | `AZURE_SUBSCRIPTION_ID`    | Azure subscription                       |
+| var    | `TRUSTED_SIGNING_ENDPOINT` | e.g. `eus.codesigning.azure.net`         |
+| var    | `TRUSTED_SIGNING_ACCOUNT`  | Trusted Signing account name             |
+| var    | `TRUSTED_SIGNING_PROFILE`  | Certificate profile name                 |
+
+The Linux build uses `-static-libstdc++ -static-libgcc` (on top of
+dynamic glibc) so the binary survives future GitHub runner image
+rotations and runs on any Linux with glibc ≥ 2.39.  The Windows build
+cross-compiles with MinGW-w64 on the same Linux runner; no Windows
+runner is used.  There is no macOS build — build from source if you
+need one.
+
+The release assets are:
+- `aas-sign-linux-x86_64`
+- `aas-sign-windows-x86_64.exe` (Authenticode-signed by the tool itself)
+- `sha256sums.txt`
+
 ## How it works
 
 1. Parse the PE and compute its Authenticode SHA-256 hash (excluding the

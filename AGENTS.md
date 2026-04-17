@@ -26,7 +26,12 @@ this same repo.  Consumers reference it as
 release binary for the runner OS, resolves an Azure token (either from
 the caller or via `az account get-access-token`), and invokes
 `aas-sign` with a multi-line `files:` input.  Asset naming convention:
-`aas-sign-{linux,windows,macos}-{x86_64,universal}[.exe]`.
+`aas-sign-{linux,windows}-x86_64[.exe]`.
+
+`.github/workflows/release.yml` builds the assets on a `v*` tag push,
+self-signs the Windows binary with the freshly-built Linux binary, and
+publishes the release with checksums.  No dependency on a previous
+release; bootstraps cleanly from the first tag.  No macOS build.
 
 ## Architecture
 
