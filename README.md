@@ -79,8 +79,6 @@ a summary and exits non-zero if any file failed.
 
 ### GitHub Actions
 
-**While the standalone tool works, this GitHub Actions is not ready.**
-
 A composite action is published alongside the tool.  It installs the
 pinned release binary for the runner OS, performs the GitHub-Actions
 OIDC handshake to mint an Azure token, and signs every file you list.
