@@ -9,12 +9,28 @@
 
 using json = nlohmann::json;
 
+// Accept either a bare hostname or a full URL for the endpoint.
+// Users commonly copy-paste a value like `https://eus.codesigning.azure.net/`
+// from the Azure portal; strip the scheme and any trailing path so the
+// underlying HTTPS client gets just the hostname it expects.
+static std::string endpoint_host(std::string s)
+{
+    auto scheme = s.find("://");
+    if (scheme != std::string::npos)
+        s.erase(0, scheme + 3);
+    auto slash = s.find('/');
+    if (slash != std::string::npos)
+        s.erase(slash);
+    return s;
+}
+
 AzureSignResult azure_sign(const std::string &endpoint,
                            const std::string &account,
                            const std::string &profile,
                            const std::string &token,
                            const uint8_t *digest, size_t digest_len)
 {
+    const std::string host = endpoint_host(endpoint);
     std::string path = "/codesigningaccounts/" + account +
                        "/certificateprofiles/" + profile +
                        "/sign?api-version=2022-06-15-preview";
@@ -24,7 +40,7 @@ AzureSignResult azure_sign(const std::string &endpoint,
     req_body["signatureAlgorithm"] = "RS256";
     req_body["digest"] = b64_digest;
 
-    auto resp = platform::https_post(endpoint, path, token,
+    auto resp = platform::https_post(host, path, token,
                                      req_body.dump());
     if (resp.status != 200 && resp.status != 202)
         throw std::runtime_error("Azure sign POST failed (HTTP " +
@@ -52,7 +68,7 @@ AzureSignResult azure_sign(const std::string &endpoint,
         int delay = std::min(1000, 50 + 10 * i++);
         std::this_thread::sleep_for(std::chrono::milliseconds(delay));
 
-        auto poll = platform::https_get(endpoint, poll_path, token);
+        auto poll = platform::https_get(host, poll_path, token);
         if (poll.status != 200)
             throw std::runtime_error("Azure sign poll failed (HTTP " +
                                      std::to_string(poll.status) + "): " +
