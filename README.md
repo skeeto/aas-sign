@@ -106,8 +106,16 @@ self-signs the Windows one with the freshly-built Linux one, and
 publishes a GitHub release with checksums.  Triggered by pushing a
 tag matching `v*`.
 
-Required repository configuration (Settings → Secrets and variables
-→ Actions):
+The sign-and-release job runs under a GitHub Actions *environment*
+called `release`.  Create it at Settings → Environments → New
+environment → `release`, then add the secrets and variables there (not
+at the repository level).  Using an environment lets the Azure
+federated-credential binding match
+`repo:<owner>/<repo>:environment:release`, which is more stable than
+matching on tag refs.
+
+Required environment configuration (Settings → Environments →
+`release`):
 
 | Kind   | Name                       | Purpose                                  |
 | ------ | -------------------------- | ---------------------------------------- |
