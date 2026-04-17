@@ -5,8 +5,6 @@ Signing][aas] with no local, private keys. It computes the Authenticode
 hash, sends it to Azure, timestamps the returned signature against an
 RFC 3161 TSA, and injects the signed CMS into the PE.
 
-[aas]: https://learn.microsoft.com/en-us/azure/trusted-signing/
-
 ## Building
 
 CMake 3.20+, a C++20 compiler. Dependencies are fetched automatically.
@@ -59,6 +57,8 @@ concurrent narratives don't interleave.  On completion the tool prints
 a summary and exits non-zero if any file failed.
 
 ### GitHub Actions
+
+**While the standalone tool works, this GitHub Actions is not ready.**
 
 A composite action is published alongside the tool.  It installs the
 pinned release binary for the runner OS, fetches an Azure token (or
@@ -124,3 +124,6 @@ On Linux/macOS:
 
 On Windows: right-click the file → Properties → Digital Signatures, or
 `signtool verify /pa myapp.exe`.
+
+
+[aas]: https://learn.microsoft.com/en-us/azure/trusted-signing/
