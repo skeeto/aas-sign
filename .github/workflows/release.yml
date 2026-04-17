@@ -101,9 +101,16 @@ jobs:
           GH_REPO:  ${{ github.repository }}
         run: |
           set -euo pipefail
+          # SemVer pre-release tags (vX.Y.Z-<anything>) are marked as
+          # GitHub pre-releases so they don't displace the "latest" tag.
+          flags=()
+          case "${GITHUB_REF_NAME}" in
+            *-*) flags+=(--prerelease) ;;
+          esac
           gh release create "${GITHUB_REF_NAME}" \
             --title "${GITHUB_REF_NAME}" \
             --generate-notes \
+            "${flags[@]}" \
             aas-sign-linux-x86_64 \
             aas-sign-windows-x86_64.exe \
             sha256sums.txt
