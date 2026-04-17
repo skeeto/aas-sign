@@ -218,10 +218,23 @@ int aas_sign_main(int argc, char **argv)
         if (env) cfg.token = env;
     }
 
-    if (cfg.endpoint.empty() || cfg.account.empty() || cfg.profile.empty() ||
-        cfg.token.empty() || files.empty()) {
-        usage_short(std::cerr, argv[0]);
-        return 1;
+    {
+        bool ok = true;
+        auto require = [&](bool present, const char *what) {
+            if (!present) {
+                std::cerr << argv[0] << ": missing " << what << '\n';
+                ok = false;
+            }
+        };
+        require(!cfg.endpoint.empty(), "--endpoint");
+        require(!cfg.account.empty(),  "--account");
+        require(!cfg.profile.empty(),  "--profile");
+        require(!cfg.token.empty(),    "--token (or $AZURE_ACCESS_TOKEN)");
+        require(!files.empty(),        "input file");
+        if (!ok) {
+            usage_short(std::cerr, argv[0]);
+            return 1;
+        }
     }
 
     if (files.size() > 1 && !cfg.dump_cms.empty()) {

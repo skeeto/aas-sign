@@ -114,17 +114,21 @@ federated-credential binding match
 `repo:<owner>/<repo>:environment:release`, which is more stable than
 matching on tag refs.
 
-Required environment configuration (Settings → Environments →
-`release`):
+Required environment secrets (Settings → Environments → `release` →
+Environment secrets):
 
-| Kind   | Name                       | Purpose                                  |
-| ------ | -------------------------- | ---------------------------------------- |
-| secret | `AZURE_CLIENT_ID`          | OIDC federated-identity app ID           |
-| secret | `AZURE_TENANT_ID`          | Azure tenant                             |
-| secret | `AZURE_SUBSCRIPTION_ID`    | Azure subscription                       |
-| var    | `TRUSTED_SIGNING_ENDPOINT` | e.g. `eus.codesigning.azure.net`         |
-| var    | `TRUSTED_SIGNING_ACCOUNT`  | Trusted Signing account name             |
-| var    | `TRUSTED_SIGNING_PROFILE`  | Certificate profile name                 |
+| Name                       | Purpose                                      |
+| -------------------------- | -------------------------------------------- |
+| `AZURE_CLIENT_ID`          | OIDC federated-identity app ID               |
+| `AZURE_TENANT_ID`          | Azure tenant                                 |
+| `AZURE_SUBSCRIPTION_ID`    | Azure subscription                           |
+| `TRUSTED_SIGNING_ENDPOINT` | e.g. `eus.codesigning.azure.net`             |
+| `TRUSTED_SIGNING_ACCOUNT`  | Trusted Signing account name                 |
+| `TRUSTED_SIGNING_PROFILE`  | Certificate profile name                     |
+
+The last three aren't strictly secrets (they're resource identifiers,
+not credentials), but GitHub's secrets namespace is convenient and
+auto-masks them in logs.
 
 The Linux build uses `-static-libstdc++ -static-libgcc` (on top of
 dynamic glibc) so the binary survives future GitHub runner image
