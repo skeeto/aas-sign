@@ -1,7 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
-project(aas-sign LANGUAGES CXX C)
+project(aas-sign VERSION 0.1.0 LANGUAGES CXX C)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Enable Windows resource compiler (windres on MinGW / rc on MSVC).
+if(WIN32)
+  enable_language(RC)
+endif()
 
 find_package(Threads REQUIRED)
 
@@ -24,6 +29,14 @@ if(NOT WIN32)
   FetchContent_MakeAvailable(mbedtls)
 endif()
 
+# Windows EXE metadata (CompanyName, FileVersion, etc.) via .rc file.
+# The template substitutes CMake project version into both the numeric
+# FILEVERSION/PRODUCTVERSION fields and the displayed string fields.
+if(WIN32)
+  configure_file(src/aas-sign.rc.in
+                 ${CMAKE_CURRENT_BINARY_DIR}/aas-sign.rc @ONLY)
+endif()
+
 add_executable(aas-sign
   src/main.cpp
   src/base64.cpp
@@ -34,8 +47,12 @@ add_executable(aas-sign
   src/cms.cpp
   src/tsa.cpp
   $<$<PLATFORM_ID:Windows>:src/win32.cpp>
+  $<$<PLATFORM_ID:Windows>:${CMAKE_CURRENT_BINARY_DIR}/aas-sign.rc>
   $<$<NOT:$<PLATFORM_ID:Windows>>:src/posix.cpp>
 )
+
+target_compile_definitions(aas-sign PRIVATE
+  AAS_SIGN_VERSION="${PROJECT_VERSION}")
 
 target_link_libraries(aas-sign PRIVATE nlohmann_json::nlohmann_json Threads::Threads)
 

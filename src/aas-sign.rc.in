@@ -1,0 +1,33 @@
+// Windows version-info resource for aas-sign.exe.
+// Generated from src/aas-sign.rc.in by CMake configure_file().
+#include <winver.h>
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION    @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+ PRODUCTVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+ FILEFLAGSMASK  VS_FFI_FILEFLAGSMASK
+ FILEFLAGS      0
+ FILEOS         VOS_NT_WINDOWS32
+ FILETYPE       VFT_APP
+ FILESUBTYPE    VFT2_UNKNOWN
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    // 040904B0 = U.S. English, Unicode
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "CompanyName",      "Christopher Wellons"
+      VALUE "FileDescription",  "Azure Artifact Signing utility"
+      VALUE "FileVersion",      "@PROJECT_VERSION@"
+      VALUE "InternalName",     "aas-sign"
+      VALUE "LegalCopyright",   "Public domain"
+      VALUE "OriginalFilename", "aas-sign.exe"
+      VALUE "ProductName",      "aas-sign"
+      VALUE "ProductVersion",   "@PROJECT_VERSION@"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x0409, 1200
+  END
+END

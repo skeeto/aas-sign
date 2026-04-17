@@ -27,7 +27,8 @@ static void usage(const char *argv0)
               << " --endpoint HOST --account NAME --profile NAME"
               << " [--token TOKEN] [--dump-cms FILE]"
               << " [--timestamp-url URL | --no-timestamp]"
-              << " [--max-parallel N] FILE [FILE ...]\n";
+              << " [--max-parallel N] FILE [FILE ...]\n"
+              << "       " << argv0 << " --version | --help\n";
 }
 
 struct Config {
@@ -173,6 +174,9 @@ int aas_sign_main(int argc, char **argv)
             max_parallel = std::max(1, atoi(argv[++i]));
         else if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
             usage(argv[0]);
+            return 0;
+        } else if (!strcmp(argv[i], "--version")) {
+            std::cout << "aas-sign " << AAS_SIGN_VERSION << '\n';
             return 0;
         } else if (argv[i][0] != '-')
             files.push_back(argv[i]);
