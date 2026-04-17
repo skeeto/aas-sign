@@ -1,5 +1,4 @@
-#ifndef CMS_H
-#define CMS_H
+#pragma once
 
 #include <array>
 #include <cstdint>
@@ -29,4 +28,3 @@ std::vector<uint8_t> cms_build_authenticode(
     const std::vector<uint8_t> &certs_der,
     const std::vector<uint8_t> &timestamp_token_der = {});
 
-#endif

@@ -1,5 +1,4 @@
-#ifndef AZURE_H
-#define AZURE_H
+#pragma once
 
 #include <cstdint>
 #include <string>
@@ -18,4 +17,3 @@ AzureSignResult azure_sign(const std::string &endpoint,
                            const std::string &token,
                            const uint8_t *digest, size_t digest_len);
 
-#endif

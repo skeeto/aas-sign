@@ -1,5 +1,4 @@
-#ifndef DER_H
-#define DER_H
+#pragma once
 
 #include <cstdint>
 #include <cstring>
@@ -45,4 +44,3 @@ inline Bytes der_raw(const uint8_t *data, size_t len) {
 constexpr uint8_t DER_SEQUENCE = 0x30;
 constexpr uint8_t DER_SET      = 0x31;
 
-#endif

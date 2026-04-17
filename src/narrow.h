@@ -1,5 +1,4 @@
-#ifndef NARROW_H
-#define NARROW_H
+#pragma once
 
 #include <cassert>
 #include <type_traits>
@@ -35,4 +34,3 @@ constexpr To narrow(From x) noexcept
     return y;
 }
 
-#endif

@@ -1,5 +1,4 @@
-#ifndef PE_H
-#define PE_H
+#pragma once
 
 #include "sha256.h"
 
@@ -37,4 +36,3 @@ private:
     void recompute_checksum();
 };
 
-#endif

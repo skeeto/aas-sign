@@ -1,5 +1,4 @@
-#ifndef TSA_H
-#define TSA_H
+#pragma once
 
 #include <cstdint>
 #include <string>
@@ -15,4 +14,3 @@
 std::vector<uint8_t> tsa_timestamp(const std::string &url,
                                    const std::vector<uint8_t> &signature);
 
-#endif

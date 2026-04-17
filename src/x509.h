@@ -1,5 +1,4 @@
-#ifndef X509_H
-#define X509_H
+#pragma once
 
 #include <cstdint>
 #include <vector>
@@ -27,4 +26,3 @@ CertId x509_cert_id(const uint8_t *cert_der, size_t cert_len);
 std::vector<std::vector<uint8_t>> x509_split_certs(const uint8_t *data,
                                                     size_t len);
 
-#endif

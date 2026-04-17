@@ -1,5 +1,4 @@
-#ifndef SHA256_H
-#define SHA256_H
+#pragma once
 
 #include <array>
 #include <cstdint>
@@ -70,4 +69,3 @@ void write_whole_file(const std::string &utf8_path,
 
 }  // namespace platform
 
-#endif
