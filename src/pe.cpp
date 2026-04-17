@@ -1,19 +1,11 @@
 #include "pe.h"
 #include "sha256.h"
-#include <stdexcept>
+#include <algorithm>
 #include <cstring>
-#ifdef _WIN32
-#include <io.h>
-#else
-#include <unistd.h>
-#endif
+#include <stdexcept>
 
-PeFile::PeFile(const std::string &path)
+PeFile::PeFile(const std::string &path) : file(path)
 {
-    f = fopen(path.c_str(), "r+b");
-    if (!f)
-        throw std::runtime_error("cannot open " + path);
-
     // Validate MZ header.
     uint8_t mz[2];
     read_at(0, mz, 2);
@@ -42,17 +34,12 @@ PeFile::PeFile(const std::string &path)
     data_dir_offset = pe_offset + (is_pe32plus ? 136 : 120);
 }
 
-PeFile::~PeFile()
-{
-    if (f) fclose(f);
-}
-
-long PeFile::checksum_offset()
+uint64_t PeFile::checksum_offset()
 {
     return pe_offset + 88;
 }
 
-long PeFile::cert_table_entry_offset()
+uint64_t PeFile::cert_table_entry_offset()
 {
     // Certificate table is data directory index 4, each entry is 8 bytes.
     return data_dir_offset + 4 * 8;
@@ -61,9 +48,9 @@ long PeFile::cert_table_entry_offset()
 std::array<uint8_t, 32> PeFile::authenticode_hash()
 {
     platform::Sha256 hash;
-    long fsize = file_size();
-    long cksum = checksum_offset();
-    long cert_entry = cert_table_entry_offset();
+    uint64_t fsize = file_size();
+    uint64_t cksum = checksum_offset();
+    uint64_t cert_entry = cert_table_entry_offset();
 
     // Read the certificate table directory entry.
     uint32_t cert_addr = read_le32(cert_entry);
@@ -71,14 +58,14 @@ std::array<uint8_t, 32> PeFile::authenticode_hash()
     bool has_cert = cert_addr != 0 && cert_size != 0;
 
     // Helper: hash a range of the file.
-    auto hash_range = [&](long start, long end) {
+    auto hash_range = [&](uint64_t start, uint64_t end) {
         uint8_t buf[8192];
-        long pos = start;
+        uint64_t pos = start;
         while (pos < end) {
-            size_t n = std::min(size_t(end - pos), sizeof(buf));
+            size_t n = size_t(std::min(uint64_t(sizeof(buf)), end - pos));
             read_at(pos, buf, n);
             hash.update(buf, n);
-            pos += long(n);
+            pos += n;
         }
     };
 
@@ -88,19 +75,19 @@ std::array<uint8_t, 32> PeFile::authenticode_hash()
     // Region 2: after checksum to certificate table entry.
     hash_range(cksum + 4, cert_entry);
     // Skip 8-byte certificate table entry.
-    long after_entry = cert_entry + 8;
+    uint64_t after_entry = cert_entry + 8;
 
     if (has_cert) {
         // Region 3: after cert entry to start of certificate table data.
         hash_range(after_entry, cert_addr);
         // Skip certificate table data.
         // Region 4: after certificate table to end of file.
-        hash_range(long(cert_addr + cert_size), fsize);
+        hash_range(uint64_t(cert_addr) + cert_size, fsize);
     } else {
         // Region 3: after cert entry to end of file.
         hash_range(after_entry, fsize);
         // Pad to 8-byte boundary.
-        int pad = (8 - int(fsize % 8)) % 8;
+        int pad = int((8 - fsize % 8) % 8);
         if (pad > 0) {
             uint8_t zeros[8] = {};
             hash.update(zeros, pad);
@@ -129,35 +116,28 @@ void PeFile::inject_signature(const std::vector<uint8_t> &cms_der)
     memcpy(win_cert.data() + 8, cms_der.data(), cms_der.size());
 
     // Determine where to write.
-    long fsize = file_size();
+    uint64_t fsize = file_size();
     uint32_t cert_addr = read_le32(cert_table_entry_offset());
     uint32_t cert_size = read_le32(cert_table_entry_offset() + 4);
     bool has_cert = cert_addr != 0 && cert_size != 0;
 
-    long write_offset;
+    uint64_t write_offset;
     if (!has_cert) {
         // Pad file to 8-byte boundary and append.
-        long aligned = fsize + (8 - fsize % 8) % 8;
-        // Write padding zeros if needed.
+        uint64_t aligned = fsize + (8 - fsize % 8) % 8;
         if (aligned > fsize) {
-            std::vector<uint8_t> zeros(aligned - fsize, 0);
+            std::vector<uint8_t> zeros(size_t(aligned - fsize), 0);
             write_at(fsize, zeros.data(), zeros.size());
         }
         write_offset = aligned;
     } else {
         // Overwrite existing certificate table at end of file.
         write_offset = cert_addr;
-        // Truncate if old was larger.
-        long old_end = cert_addr + cert_size;
-        if (long(write_offset + win_cert.size()) < old_end) {
-            // Truncate file.
-            fflush(f);
-#ifdef _WIN32
-            _chsize(_fileno(f), (long)(write_offset + win_cert.size()));
-#else
-            ftruncate(fileno(f), write_offset + win_cert.size());
-#endif
-        }
+        // Truncate if the new contents don't reach the old end.
+        uint64_t old_end = uint64_t(cert_addr) + cert_size;
+        uint64_t new_end = write_offset + win_cert.size();
+        if (new_end < old_end)
+            file.truncate(new_end);
     }
 
     // Write the WIN_CERTIFICATE.
@@ -174,20 +154,18 @@ void PeFile::inject_signature(const std::vector<uint8_t> &cms_der)
 void PeFile::recompute_checksum()
 {
     // IMAGEHLP-compatible checksum algorithm.
-    fflush(f);
-    long fsize = file_size();
-    long cksum_off = checksum_offset();
+    uint64_t fsize = file_size();
+    uint64_t cksum_off = checksum_offset();
 
     // Zero out old checksum first.
     write_le32(cksum_off, 0);
-    fflush(f);
 
     // Read entire file in 4-byte chunks.
     uint64_t checksum = 0;
     uint8_t buf[65536];
-    long pos = 0;
+    uint64_t pos = 0;
     while (pos < fsize) {
-        size_t to_read = std::min(size_t(fsize - pos), sizeof(buf));
+        size_t to_read = size_t(std::min(uint64_t(sizeof(buf)), fsize - pos));
         // Pad partial final read to 4-byte boundary.
         size_t padded_read = to_read;
         if (padded_read % 4 != 0)
@@ -196,7 +174,7 @@ void PeFile::recompute_checksum()
         read_at(pos, buf, to_read);
 
         for (size_t i = 0; i < padded_read; i += 4) {
-            if (pos + long(i) == cksum_off)
+            if (pos + i == cksum_off)
                 continue;  // Skip checksum field.
             uint32_t dword = uint32_t(buf[i]) |
                              (uint32_t(buf[i + 1]) << 8) |
@@ -206,7 +184,7 @@ void PeFile::recompute_checksum()
             if (checksum > 0xFFFFFFFF)
                 checksum = (checksum & 0xFFFFFFFF) + (checksum >> 32);
         }
-        pos += long(to_read);
+        pos += to_read;
     }
 
     // Fold twice to 16 bits, add file length.
@@ -215,24 +193,19 @@ void PeFile::recompute_checksum()
     uint32_t result = uint32_t(checksum & 0xFFFF) + uint32_t(fsize);
 
     write_le32(cksum_off, result);
-    fflush(f);
 }
 
-void PeFile::read_at(long offset, void *buf, size_t len)
+void PeFile::read_at(uint64_t offset, void *buf, size_t len)
 {
-    fseek(f, offset, SEEK_SET);
-    if (fread(buf, 1, len, f) != len)
-        throw std::runtime_error("PE read error");
+    file.read_at(offset, buf, len);
 }
 
-void PeFile::write_at(long offset, const void *buf, size_t len)
+void PeFile::write_at(uint64_t offset, const void *buf, size_t len)
 {
-    fseek(f, offset, SEEK_SET);
-    if (fwrite(buf, 1, len, f) != len)
-        throw std::runtime_error("PE write error");
+    file.write_at(offset, buf, len);
 }
 
-uint32_t PeFile::read_le32(long offset)
+uint32_t PeFile::read_le32(uint64_t offset)
 {
     uint8_t b[4];
     read_at(offset, b, 4);
@@ -240,14 +213,14 @@ uint32_t PeFile::read_le32(long offset)
            (uint32_t(b[2]) << 16) | (uint32_t(b[3]) << 24);
 }
 
-uint16_t PeFile::read_le16(long offset)
+uint16_t PeFile::read_le16(uint64_t offset)
 {
     uint8_t b[2];
     read_at(offset, b, 2);
     return uint16_t(b[0]) | (uint16_t(b[1]) << 8);
 }
 
-void PeFile::write_le32(long offset, uint32_t val)
+void PeFile::write_le32(uint64_t offset, uint32_t val)
 {
     uint8_t b[4] = {
         uint8_t(val), uint8_t(val >> 8),
@@ -256,8 +229,7 @@ void PeFile::write_le32(long offset, uint32_t val)
     write_at(offset, b, 4);
 }
 
-long PeFile::file_size()
+uint64_t PeFile::file_size()
 {
-    fseek(f, 0, SEEK_END);
-    return ftell(f);
+    return file.size();
 }

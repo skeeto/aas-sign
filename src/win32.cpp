@@ -1,15 +1,21 @@
+#include "app.h"
 #include "sha256.h"
 
 #ifdef _WIN32
 
 #include <windows.h>
 #include <bcrypt.h>
+#include <shellapi.h>
 #include <winhttp.h>
+#include <cstdint>
+#include <sstream>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 #pragma comment(lib, "bcrypt.lib")
 #pragma comment(lib, "winhttp.lib")
+#pragma comment(lib, "shell32.lib")
 
 namespace platform {
 
@@ -261,6 +267,211 @@ HttpResponse http_post_binary(const std::string &host, int port,
     return {static_cast<int>(status), response_body};
 }
 
+// --- File I/O ---
+
+static std::wstring utf8_to_wide(const std::string &s)
+{
+    if (s.empty()) return {};
+    int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), int(s.size()),
+                                nullptr, 0);
+    if (n <= 0)
+        throw std::runtime_error("UTF-8 -> UTF-16 conversion failed");
+    std::wstring w(size_t(n), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.data(), int(s.size()), w.data(), n);
+    return w;
+}
+
+static std::string win_error(DWORD code)
+{
+    std::ostringstream s;
+    s << "Win32 error " << code;
+    return s.str();
+}
+
+static HANDLE file_handle(void *impl) { return HANDLE(impl); }
+
+File::File(const std::string &utf8_path)
+    : path_(utf8_path), impl_(INVALID_HANDLE_VALUE)
+{
+    auto wpath = utf8_to_wide(path_);
+    HANDLE h = CreateFileW(wpath.c_str(),
+                           GENERIC_READ | GENERIC_WRITE,
+                           FILE_SHARE_READ,
+                           nullptr,
+                           OPEN_EXISTING,
+                           FILE_ATTRIBUTE_NORMAL,
+                           nullptr);
+    if (h == INVALID_HANDLE_VALUE)
+        throw std::runtime_error("open " + path_ + ": " +
+                                 win_error(GetLastError()));
+    impl_ = h;
+}
+
+File::~File()
+{
+    HANDLE h = file_handle(impl_);
+    if (h && h != INVALID_HANDLE_VALUE) CloseHandle(h);
+}
+
+uint64_t File::size()
+{
+    LARGE_INTEGER sz;
+    if (!GetFileSizeEx(file_handle(impl_), &sz))
+        throw std::runtime_error("GetFileSizeEx " + path_ + ": " +
+                                 win_error(GetLastError()));
+    return uint64_t(sz.QuadPart);
+}
+
+void File::read_at(uint64_t offset, void *buf, size_t len)
+{
+    HANDLE h = file_handle(impl_);
+    uint8_t *p = static_cast<uint8_t *>(buf);
+    while (len > 0) {
+        OVERLAPPED ov{};
+        ov.Offset = DWORD(offset & 0xFFFFFFFFu);
+        ov.OffsetHigh = DWORD(offset >> 32);
+        DWORD to_read = DWORD(len > 0x40000000u ? 0x40000000u : len);
+        DWORD got = 0;
+        if (!ReadFile(h, p, to_read, &got, &ov)) {
+            DWORD err = GetLastError();
+            throw std::runtime_error("ReadFile " + path_ + ": " +
+                                     win_error(err));
+        }
+        if (got == 0)
+            throw std::runtime_error("ReadFile " + path_ +
+                                     ": unexpected EOF");
+        p += got;
+        offset += got;
+        len -= got;
+    }
+}
+
+void File::write_at(uint64_t offset, const void *buf, size_t len)
+{
+    HANDLE h = file_handle(impl_);
+    const uint8_t *p = static_cast<const uint8_t *>(buf);
+    while (len > 0) {
+        OVERLAPPED ov{};
+        ov.Offset = DWORD(offset & 0xFFFFFFFFu);
+        ov.OffsetHigh = DWORD(offset >> 32);
+        DWORD to_write = DWORD(len > 0x40000000u ? 0x40000000u : len);
+        DWORD wrote = 0;
+        if (!WriteFile(h, p, to_write, &wrote, &ov)) {
+            DWORD err = GetLastError();
+            throw std::runtime_error("WriteFile " + path_ + ": " +
+                                     win_error(err));
+        }
+        if (wrote == 0)
+            throw std::runtime_error("WriteFile " + path_ +
+                                     ": zero bytes written");
+        p += wrote;
+        offset += wrote;
+        len -= wrote;
+    }
+}
+
+void File::truncate(uint64_t new_size)
+{
+    HANDLE h = file_handle(impl_);
+    LARGE_INTEGER pos;
+    pos.QuadPart = LONGLONG(new_size);
+    if (!SetFilePointerEx(h, pos, nullptr, FILE_BEGIN))
+        throw std::runtime_error("SetFilePointerEx " + path_ + ": " +
+                                 win_error(GetLastError()));
+    if (!SetEndOfFile(h))
+        throw std::runtime_error("SetEndOfFile " + path_ + ": " +
+                                 win_error(GetLastError()));
+}
+
+void File::flush()
+{
+    HANDLE h = file_handle(impl_);
+    if (!FlushFileBuffers(h)) {
+        DWORD err = GetLastError();
+        // FlushFileBuffers on a handle that doesn't support flushing
+        // (e.g. a stdout pipe -- not our case, but be lenient) returns
+        // ERROR_INVALID_HANDLE or ERROR_ACCESS_DENIED.  For a real file
+        // both represent an error worth reporting.
+        throw std::runtime_error("FlushFileBuffers " + path_ + ": " +
+                                 win_error(err));
+    }
+}
+
+void write_whole_file(const std::string &utf8_path,
+                      const uint8_t *data, size_t len)
+{
+    auto wpath = utf8_to_wide(utf8_path);
+    HANDLE h = CreateFileW(wpath.c_str(),
+                           GENERIC_WRITE,
+                           0,
+                           nullptr,
+                           CREATE_ALWAYS,
+                           FILE_ATTRIBUTE_NORMAL,
+                           nullptr);
+    if (h == INVALID_HANDLE_VALUE)
+        throw std::runtime_error("open(write) " + utf8_path + ": " +
+                                 win_error(GetLastError()));
+    const uint8_t *p = data;
+    size_t remaining = len;
+    while (remaining > 0) {
+        DWORD chunk = DWORD(remaining > 0x40000000u ? 0x40000000u : remaining);
+        DWORD wrote = 0;
+        if (!WriteFile(h, p, chunk, &wrote, nullptr)) {
+            DWORD err = GetLastError();
+            CloseHandle(h);
+            throw std::runtime_error("WriteFile " + utf8_path + ": " +
+                                     win_error(err));
+        }
+        p += wrote;
+        remaining -= wrote;
+    }
+    if (!CloseHandle(h))
+        throw std::runtime_error("CloseHandle " + utf8_path + ": " +
+                                 win_error(GetLastError()));
+}
+
 }  // namespace platform
+
+// --- Entry point ---
+
+// Windows argv is in the system code page, which loses non-ASCII
+// characters and is code-page-dependent.  Fetch the wide command line
+// directly, transcode to UTF-8, and hand off to aas_sign_main().
+int main()
+{
+    int wargc = 0;
+    LPWSTR *wargv = CommandLineToArgvW(GetCommandLineW(), &wargc);
+    if (!wargv) {
+        fprintf(stderr, "CommandLineToArgvW failed (error %lu)\n",
+                GetLastError());
+        return 1;
+    }
+
+    // Stable storage for the UTF-8 arg strings and the char* argv array.
+    std::vector<std::string> args(size_t(wargc > 0 ? wargc : 0));
+    std::vector<char *> argv(size_t(wargc > 0 ? wargc : 0) + 1, nullptr);
+    for (int i = 0; i < wargc; i++) {
+        const wchar_t *w = wargv[i];
+        int n = WideCharToMultiByte(CP_UTF8, 0, w, -1,
+                                    nullptr, 0, nullptr, nullptr);
+        if (n <= 0) {
+            LocalFree(wargv);
+            fprintf(stderr, "WideCharToMultiByte failed on arg %d\n", i);
+            return 1;
+        }
+        args[i].resize(size_t(n) - 1);  // exclude trailing NUL
+        WideCharToMultiByte(CP_UTF8, 0, w, -1, args[i].data(), n,
+                            nullptr, nullptr);
+        argv[i] = args[i].data();
+    }
+    LocalFree(wargv);
+
+    // Make stderr/stdout render UTF-8 error messages correctly in a
+    // console window.  Redirection to files is untouched.
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+
+    return aas_sign_main(wargc, argv.data());
+}
 
 #endif  // _WIN32

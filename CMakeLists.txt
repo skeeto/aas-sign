@@ -40,7 +40,7 @@ add_executable(aas-sign
 target_link_libraries(aas-sign PRIVATE nlohmann_json::nlohmann_json Threads::Threads)
 
 if(WIN32)
-  target_link_libraries(aas-sign PRIVATE winhttp bcrypt)
+  target_link_libraries(aas-sign PRIVATE winhttp bcrypt shell32)
 else()
   target_include_directories(aas-sign PRIVATE
     ${mbedtls_SOURCE_DIR}/include)

@@ -1,3 +1,4 @@
+#include "app.h"
 #include "sha256.h"
 
 #include <mbedtls/sha256.h>
@@ -7,9 +8,14 @@
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/error.h>
 
+#include <cerrno>
+#include <cstdint>
 #include <cstring>
+#include <fcntl.h>
 #include <netdb.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #include <sstream>
@@ -316,4 +322,131 @@ HttpResponse http_post_binary(const std::string &host, int port,
     return parse_http_response(raw);
 }
 
+// --- File I/O ---
+
+static int file_fd(const File &f, void *impl)
+{
+    // impl_ holds (fd + 1) so we can distinguish "unset" (nullptr) from fd 0.
+    (void)f;
+    return int(reinterpret_cast<intptr_t>(impl)) - 1;
+}
+
+static std::string errno_msg(const char *op, const std::string &path)
+{
+    std::ostringstream s;
+    s << op << " " << path << ": " << std::strerror(errno);
+    return s.str();
+}
+
+File::File(const std::string &utf8_path) : path_(utf8_path), impl_(nullptr)
+{
+    int fd = ::open(path_.c_str(), O_RDWR | O_CLOEXEC);
+    if (fd < 0)
+        throw std::runtime_error(errno_msg("open", path_));
+    impl_ = reinterpret_cast<void *>(intptr_t(fd + 1));
+}
+
+File::~File()
+{
+    int fd = file_fd(*this, impl_);
+    if (fd >= 0) ::close(fd);
+}
+
+uint64_t File::size()
+{
+    int fd = file_fd(*this, impl_);
+    struct stat st;
+    if (::fstat(fd, &st) < 0)
+        throw std::runtime_error(errno_msg("fstat", path_));
+    return uint64_t(st.st_size);
+}
+
+void File::read_at(uint64_t offset, void *buf, size_t len)
+{
+    int fd = file_fd(*this, impl_);
+    uint8_t *p = static_cast<uint8_t *>(buf);
+    while (len > 0) {
+        ssize_t n = ::pread(fd, p, len, off_t(offset));
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            throw std::runtime_error(errno_msg("pread", path_));
+        }
+        if (n == 0)
+            throw std::runtime_error("pread " + path_ +
+                                     ": unexpected EOF");
+        p += n;
+        offset += uint64_t(n);
+        len -= size_t(n);
+    }
+}
+
+void File::write_at(uint64_t offset, const void *buf, size_t len)
+{
+    int fd = file_fd(*this, impl_);
+    const uint8_t *p = static_cast<const uint8_t *>(buf);
+    while (len > 0) {
+        ssize_t n = ::pwrite(fd, p, len, off_t(offset));
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            throw std::runtime_error(errno_msg("pwrite", path_));
+        }
+        if (n == 0)
+            throw std::runtime_error("pwrite " + path_ +
+                                     ": zero bytes written");
+        p += n;
+        offset += uint64_t(n);
+        len -= size_t(n);
+    }
+}
+
+void File::truncate(uint64_t new_size)
+{
+    int fd = file_fd(*this, impl_);
+    if (::ftruncate(fd, off_t(new_size)) < 0)
+        throw std::runtime_error(errno_msg("ftruncate", path_));
+}
+
+void File::flush()
+{
+    int fd = file_fd(*this, impl_);
+    // fsync would be overkill for a local file-edit; fdatasync is fine
+    // where available, but fsync is the portable choice.
+    if (::fsync(fd) < 0 && errno != EINVAL) {
+        // Some filesystems (e.g. /tmp on some platforms) reject fsync
+        // with EINVAL; treat as best-effort.
+        throw std::runtime_error(errno_msg("fsync", path_));
+    }
+}
+
+void write_whole_file(const std::string &utf8_path,
+                      const uint8_t *data, size_t len)
+{
+    int fd = ::open(utf8_path.c_str(),
+                    O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    if (fd < 0)
+        throw std::runtime_error(errno_msg("open(write)", utf8_path));
+    size_t off = 0;
+    while (off < len) {
+        ssize_t n = ::write(fd, data + off, len - off);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            int saved = errno;
+            ::close(fd);
+            errno = saved;
+            throw std::runtime_error(errno_msg("write", utf8_path));
+        }
+        off += size_t(n);
+    }
+    if (::close(fd) < 0)
+        throw std::runtime_error(errno_msg("close", utf8_path));
+}
+
 }  // namespace platform
+
+// --- Entry point ---
+
+// POSIX argv is UTF-8 under any modern locale.  Forward as-is.
+int main(int argc, char **argv)
+{
+    return aas_sign_main(argc, argv);
+}

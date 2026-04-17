@@ -1,6 +1,8 @@
+#include "app.h"
 #include "azure.h"
 #include "cms.h"
 #include "pe.h"
+#include "sha256.h"
 #include "tsa.h"
 
 #include <algorithm>
@@ -8,7 +10,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <fstream>
 #include <iostream>
 #include <mutex>
 #include <sstream>
@@ -127,9 +128,8 @@ static SignResult sign_one_file(const std::string &file, const Config &cfg,
                                               timestamp_token);
 
         if (!cfg.dump_cms.empty()) {
-            std::ofstream out(cfg.dump_cms, std::ios::binary);
-            out.write(reinterpret_cast<const char *>(cms_der.data()),
-                      cms_der.size());
+            platform::write_whole_file(cfg.dump_cms, cms_der.data(),
+                                       cms_der.size());
             log.line() << "CMS blob written to " << cfg.dump_cms
                        << " (" << cms_der.size() << " bytes)\n";
         }
@@ -147,7 +147,7 @@ static SignResult sign_one_file(const std::string &file, const Config &cfg,
     return r;
 }
 
-int main(int argc, char **argv)
+int aas_sign_main(int argc, char **argv)
 {
     Config cfg;
     cfg.timestamp_url = DEFAULT_TSA_URL;
