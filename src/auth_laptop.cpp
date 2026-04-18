@@ -159,6 +159,30 @@ void delete_cache()
     platform::remove_file(cache_path());
 }
 
+// Merge any non-empty signing defaults into config.json (preserving
+// fields the caller didn't touch), and print a one-line note on the
+// write.  No-op when all three are empty.  Shared by `login` and
+// `config` subcommands.
+void save_signing_defaults(const std::string &endpoint,
+                           const std::string &account,
+                           const std::string &profile)
+{
+    if (endpoint.empty() && account.empty() && profile.empty())
+        return;
+    std::string cfg_path = platform::config_dir() + "/config.json";
+    json cfg;
+    std::ifstream existing(cfg_path);
+    if (existing) {
+        try { existing >> cfg; } catch (...) { cfg = json::object(); }
+    }
+    if (!cfg.is_object()) cfg = json::object();
+    if (!endpoint.empty()) cfg["endpoint"] = endpoint;
+    if (!account.empty())  cfg["account"]  = account;
+    if (!profile.empty())  cfg["profile"]  = profile;
+    atomic_write_json(cfg_path, cfg);
+    platform::write_stderr("Saved signing defaults to " + cfg_path + "\n");
+}
+
 // ----- Token endpoints -------------------------------------------------
 
 constexpr const char SCOPE_SIGN[] =
@@ -361,25 +385,61 @@ int login_main(int argc, char **argv)
         platform::write_stderr(os.str());
     }
 
-    // If any signing-defaults flags were provided, merge them into
-    // config.json (preserve fields the flags didn't touch).  Post-login
+    // Merge any signing-defaults flags into config.json.  Post-login
     // so a failed auth doesn't pollute the config.
-    if (!cfg_endpoint.empty() || !cfg_account.empty() ||
-        !cfg_profile.empty()) {
-        std::string cfg_path = platform::config_dir() + "/config.json";
-        json cfg;
-        std::ifstream existing(cfg_path);
-        if (existing) {
-            try { existing >> cfg; } catch (...) { cfg = json::object(); }
+    save_signing_defaults(cfg_endpoint, cfg_account, cfg_profile);
+
+    return 0;
+}
+
+// ----- Config ----------------------------------------------------------
+
+int config_main(int argc, char **argv)
+{
+    std::string endpoint, account, profile;
+
+    for (int i = 2; i < argc; i++) {  // argv[1] == "config"
+        if (!strcmp(argv[i], "--endpoint") && i + 1 < argc)
+            endpoint = argv[++i];
+        else if (!strcmp(argv[i], "--account") && i + 1 < argc)
+            account = argv[++i];
+        else if (!strcmp(argv[i], "--profile") && i + 1 < argc)
+            profile = argv[++i];
+        else if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
+            std::ostringstream os;
+            os
+                << "usage: aas-sign config [--endpoint H] [--account N]"
+                                                 " [--profile P]\n"
+                << "\n"
+                << "Write signing defaults to\n"
+                << "    " << platform::config_dir() << "/config.json\n"
+                << "without performing a login.  Any fields not passed are\n"
+                << "preserved as they are in the existing file.  Equivalent\n"
+                << "to passing the same flags to `aas-sign login`, minus the\n"
+                << "auth step.\n"
+                << "\n"
+                << "  --endpoint H   Azure Trusted Signing endpoint hostname.\n"
+                << "  --account N    Trusted Signing account name.\n"
+                << "  --profile P    Certificate profile name.\n";
+            platform::write_stdout(os.str());
+            return 0;
         }
-        if (!cfg.is_object()) cfg = json::object();
-        if (!cfg_endpoint.empty()) cfg["endpoint"] = cfg_endpoint;
-        if (!cfg_account.empty())  cfg["account"]  = cfg_account;
-        if (!cfg_profile.empty())  cfg["profile"]  = cfg_profile;
-        atomic_write_json(cfg_path, cfg);
-        platform::write_stderr("Saved signing defaults to " + cfg_path + "\n");
+        else {
+            platform::write_stderr(
+                std::string("aas-sign config: unknown option: ") +
+                argv[i] + "\n");
+            return 1;
+        }
     }
 
+    if (endpoint.empty() && account.empty() && profile.empty()) {
+        platform::write_stderr(
+            "aas-sign config: nothing to do; pass at least one of"
+            " --endpoint, --account, --profile\n");
+        return 1;
+    }
+
+    save_signing_defaults(endpoint, account, profile);
     return 0;
 }
 

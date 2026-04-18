@@ -42,6 +42,13 @@ int login_main(int argc, char **argv);
 // public revocation endpoint for this flow).
 int logout_main(int argc, char **argv);
 
+// Run the `aas-sign config` subcommand: merge --endpoint/--account/
+// --profile into the user's config.json without touching auth state.
+// Same file, same merge semantics, as `aas-sign login` with those
+// flags -- useful when you've already logged in and just want to
+// populate or update the signing defaults.
+int config_main(int argc, char **argv);
+
 // Attempt to read the cached refresh token and exchange it for a
 // fresh access token for the codesigning.azure.net scope.  Returns
 // the empty string if no cache exists; throws std::runtime_error on

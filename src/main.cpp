@@ -31,6 +31,7 @@ static void usage_short(const char *argv0)
     os << "usage: " << argv0 << " sign [options] FILE [FILE ...]\n"
        << "       " << argv0 << " login [--endpoint H --account N --profile P] [--tenant T]\n"
        << "       " << argv0 << " logout\n"
+       << "       " << argv0 << " config [--endpoint H --account N --profile P]\n"
        << "Try `" << argv0 << " --help' for more information.\n";
     platform::write_stderr(os.str());
 }
@@ -42,6 +43,7 @@ static void usage_full(const char *argv0)
         << "usage: " << argv0 << " sign [options] FILE [FILE ...]\n"
         << "       " << argv0 << " login [--endpoint H --account N --profile P] [--tenant T]\n"
         << "       " << argv0 << " logout\n"
+        << "       " << argv0 << " config [--endpoint H --account N --profile P]\n"
         << "       " << argv0 << " --version | --help\n"
         << "\n"
         << "Sign PE images (EXE, DLL) via Azure Artifact Signing "
@@ -56,6 +58,10 @@ static void usage_full(const char *argv0)
         << "                       Can also save --endpoint/--account/--profile\n"
         << "                       into config.json alongside the cache.\n"
         << "  logout               Delete the cached refresh token.\n"
+        << "  config               Write signing defaults (--endpoint/--account/\n"
+        << "                       --profile) to config.json without touching\n"
+        << "                       auth state.  Equivalent to passing the same\n"
+        << "                       flags to `login`, minus the auth step.\n"
         << "\n"
         << "sign options:\n"
         << "  --endpoint HOST      Azure Trusted Signing endpoint hostname,\n"
@@ -483,6 +489,8 @@ int aas_sign_main(int argc, char **argv)
         return login_main(argc, argv);
     if (!strcmp(argv[1], "logout"))
         return logout_main(argc, argv);
+    if (!strcmp(argv[1], "config"))
+        return config_main(argc, argv);
 
     {
         std::ostringstream os;
