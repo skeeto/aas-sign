@@ -1,9 +1,9 @@
 #include "oidc.hpp"
 #include "sha256.hpp"
+#include "urlenc.hpp"
 
 #include <nlohmann/json.hpp>
 
-#include <cctype>
 #include <cstdlib>
 #include <stdexcept>
 
@@ -17,28 +17,6 @@ OidcRuntime oidc_runtime()
     if (const char *t = std::getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN"))
         r.request_token = t;
     return r;
-}
-
-// Percent-encode per RFC 3986 "unreserved"; used for the form body fields
-// of the token exchange (some values -- the JWT especially -- contain
-// characters like '.', '_', '-', '+', '/' that are mostly fine but the
-// safe path is to encode everything not in [A-Za-z0-9._~-]).
-static std::string url_encode(const std::string &s)
-{
-    static const char hex[] = "0123456789ABCDEF";
-    std::string out;
-    out.reserve(s.size());
-    for (char ch : s) {
-        unsigned char c = static_cast<unsigned char>(ch);
-        if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
-            out.push_back(char(c));
-        } else {
-            out.push_back('%');
-            out.push_back(hex[(c >> 4) & 0xF]);
-            out.push_back(hex[c & 0xF]);
-        }
-    }
-    return out;
 }
 
 std::string oidc_fetch_azure_token(const OidcRuntime &r,

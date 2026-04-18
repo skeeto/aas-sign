@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(aas-sign VERSION 0.2.0 LANGUAGES CXX C)
+project(aas-sign VERSION 0.3.0 LANGUAGES CXX C)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -47,6 +47,8 @@ add_executable(aas-sign
   src/cms.cpp
   src/tsa.cpp
   src/oidc.cpp
+  src/urlenc.cpp
+  src/auth_laptop.cpp
   $<$<PLATFORM_ID:Windows>:src/win32.cpp>
   $<$<PLATFORM_ID:Windows>:${CMAKE_CURRENT_BINARY_DIR}/aas-sign.rc>
   $<$<NOT:$<PLATFORM_ID:Windows>>:src/posix.cpp>
@@ -62,7 +64,8 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 if(WIN32)
-  target_link_libraries(aas-sign PRIVATE winhttp bcrypt shell32)
+  target_link_libraries(aas-sign PRIVATE
+    winhttp bcrypt shell32 ws2_32)
 else()
   target_include_directories(aas-sign PRIVATE
     ${mbedtls_SOURCE_DIR}/include)

@@ -1,4 +1,5 @@
 #include "app.hpp"
+#include "auth_laptop.hpp"
 #include "azure.hpp"
 #include "cms.hpp"
 #include "oidc.hpp"
@@ -6,11 +7,14 @@
 #include "sha256.hpp"
 #include "tsa.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <iostream>
 #include <mutex>
 #include <sstream>
@@ -24,20 +28,29 @@ static const char DEFAULT_TSA_URL[] =
 
 static void usage_short(std::ostream &os, const char *argv0)
 {
-    os << "usage: " << argv0 << " [options] FILE [FILE ...]\n"
+    os << "usage: " << argv0 << " sign [options] FILE [FILE ...]\n"
+       << "       " << argv0 << " login [--tenant T] [--client-id C]\n"
        << "Try `" << argv0 << " --help' for more information.\n";
 }
 
 static void usage_full(const char *argv0)
 {
     std::cout
-        << "usage: " << argv0 << " [options] FILE [FILE ...]\n"
+        << "usage: " << argv0 << " sign [options] FILE [FILE ...]\n"
+        << "       " << argv0 << " login [--tenant T] [--client-id C]\n"
         << "       " << argv0 << " --version | --help\n"
         << "\n"
         << "Sign PE images (EXE, DLL) via Azure Artifact Signing "
            "(Trusted Signing).\n"
         << "\n"
-        << "Options:\n"
+        << "Subcommands:\n"
+        << "  sign FILE ...        Sign one or more PE images.\n"
+        << "  login                Interactive browser login; caches a refresh\n"
+        << "                       token under ${XDG_CONFIG_HOME:-~/.config}/\n"
+        << "                       aas-sign (or %APPDATA%\\aas-sign on Windows).\n"
+        << "                       Subsequent `sign` runs then use the cache.\n"
+        << "\n"
+        << "sign options:\n"
         << "  --endpoint HOST      Azure Trusted Signing endpoint hostname,\n"
         << "                       e.g. eus.codesigning.azure.net.  Required.\n"
         << "  --account NAME       Trusted Signing account name.  Required.\n"
@@ -61,6 +74,22 @@ static void usage_full(const char *argv0)
         << "  --dump-cms FILE      Write raw CMS DER blob to FILE for debugging\n"
         << "                       (openssl asn1parse -inform DER).  Single-file\n"
         << "                       mode only.\n"
+        << "\n"
+        << "If no token source is provided, aas-sign sign will attempt to use\n"
+        << "a refresh token cached by a prior `aas-sign login`.\n"
+        << "\n"
+        << "--endpoint, --account, and --profile can also be pre-filled by\n"
+        << "putting them in ${XDG_CONFIG_HOME:-~/.config}/aas-sign/config.json\n"
+        << "(or %APPDATA%\\aas-sign\\config.json on Windows):\n"
+        << "\n"
+        << "    { \"endpoint\": \"eus.codesigning.azure.net\",\n"
+        << "      \"account\": \"myaccount\",\n"
+        << "      \"profile\": \"myprofile\" }\n"
+        << "\n"
+        << "login options:\n"
+        << "  --tenant TENANT      Azure tenant (default: organizations).\n"
+        << "  --client-id ID       Override the default aas-sign app ID.\n"
+        << "\n"
         << "  --version            Print version and exit.\n"
         << "  --help, -h           Print this help and exit.\n";
 }
@@ -187,14 +216,15 @@ static SignResult sign_one_file(const std::string &file, const Config &cfg,
     return r;
 }
 
-int aas_sign_main(int argc, char **argv)
+static int sign_main(int argc, char **argv)
 {
     Config cfg;
     cfg.timestamp_url = DEFAULT_TSA_URL;
     std::vector<std::string> files;
     int max_parallel = 8;
 
-    for (int i = 1; i < argc; i++) {
+    // argv[1] is "sign" (guaranteed by aas_sign_main dispatch).
+    for (int i = 2; i < argc; i++) {
         if (!strcmp(argv[i], "--endpoint") && i + 1 < argc)
             cfg.endpoint = argv[++i];
         else if (!strcmp(argv[i], "--account") && i + 1 < argc)
@@ -230,12 +260,32 @@ int aas_sign_main(int argc, char **argv)
         }
     }
 
+    // Fill missing --endpoint/--account/--profile from a user-local
+    // config file if present, so laptop users don't retype them every
+    // invocation.  CLI flags still win.  Missing file or missing fields
+    // are fine -- the required-arg check below surfaces anything left
+    // unset.
+    try {
+        std::ifstream f(platform::config_dir() + "/config.json");
+        if (f) {
+            nlohmann::json j;
+            f >> j;
+            if (cfg.endpoint.empty()) cfg.endpoint = j.value("endpoint", "");
+            if (cfg.account.empty())  cfg.account  = j.value("account", "");
+            if (cfg.profile.empty())  cfg.profile  = j.value("profile", "");
+        }
+    } catch (const std::exception &e) {
+        std::cerr << "warning: ignoring unreadable config.json: "
+                  << e.what() << '\n';
+    }
+
     // Token resolution, in order of precedence:
     //   1. --token
     //   2. $AZURE_ACCESS_TOKEN
     //   3. OIDC (if --oidc-client-id + --oidc-tenant-id, or their env
     //      fallbacks AZURE_CLIENT_ID/AZURE_TENANT_ID, are set AND the
     //      runner has injected the id-token endpoint)
+    //   4. Cached refresh token from a prior `aas-sign login`.
     if (cfg.token.empty()) {
         if (const char *env = getenv("AZURE_ACCESS_TOKEN"))
             cfg.token = env;
@@ -260,6 +310,17 @@ int aas_sign_main(int argc, char **argv)
         }
     }
 
+    if (cfg.token.empty()) {
+        try {
+            cfg.token = try_cached_refresh();
+            if (!cfg.token.empty())
+                std::cerr << "Using cached login.\n";
+        } catch (const std::exception &e) {
+            std::cerr << "error: " << e.what() << '\n';
+            return 1;
+        }
+    }
+
     {
         bool ok = true;
         auto require = [&](bool present, const char *what) {
@@ -272,8 +333,8 @@ int aas_sign_main(int argc, char **argv)
         require(!cfg.account.empty(),  "--account");
         require(!cfg.profile.empty(),  "--profile");
         require(!cfg.token.empty(),
-                "--token (or $AZURE_ACCESS_TOKEN, "
-                "or --oidc-client-id + --oidc-tenant-id in a runner)");
+                "authentication -- pass --token, set $AZURE_ACCESS_TOKEN, "
+                "use --oidc-* (in CI), or run `aas-sign login` first");
         require(!files.empty(),        "input file");
         if (!ok) {
             usage_short(std::cerr, argv[0]);
@@ -337,5 +398,33 @@ int aas_sign_main(int argc, char **argv)
     std::cerr << ". Failures:\n";
     for (auto *f : failures)
         std::cerr << "  " << f->file << ": " << f->error << '\n';
+    return 1;
+}
+
+// Top-level dispatch: the first non-flag arg is a subcommand
+// (`sign` or `login`).  Bare --version/--help at argv[1] are
+// accepted as top-level conveniences; everything else routes to
+// a subcommand.
+int aas_sign_main(int argc, char **argv)
+{
+    if (argc < 2) {
+        usage_short(std::cerr, argv[0]);
+        return 1;
+    }
+    if (!strcmp(argv[1], "--help") || !strcmp(argv[1], "-h")) {
+        usage_full(argv[0]);
+        return 0;
+    }
+    if (!strcmp(argv[1], "--version")) {
+        std::cout << "aas-sign " << AAS_SIGN_VERSION << '\n';
+        return 0;
+    }
+    if (!strcmp(argv[1], "sign"))
+        return sign_main(argc, argv);
+    if (!strcmp(argv[1], "login"))
+        return login_main(argc, argv);
+
+    std::cerr << argv[0] << ": unknown subcommand: " << argv[1] << '\n';
+    usage_short(std::cerr, argv[0]);
     return 1;
 }

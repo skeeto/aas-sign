@@ -3,11 +3,17 @@
 
 #ifdef _WIN32
 
+// winsock2.h must precede windows.h: otherwise windows.h pulls in the
+// older winsock.h and we get conflicting declarations.
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
 #include <bcrypt.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <winhttp.h>
 #include <cstdint>
+#include <cstdlib>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -539,6 +545,165 @@ void write_whole_file(const std::string &utf8_path,
     if (!CloseHandle(h))
         throw std::runtime_error("CloseHandle " + utf8_path + ": " +
                                  win_error(GetLastError()));
+}
+
+// --- LoopbackServer / launch_browser / config_dir (OAuth login) ---
+
+// Lazy one-time WSAStartup.  Safe to call many times.
+static void wsa_startup_once()
+{
+    static bool done = false;
+    if (done) return;
+    WSADATA wsa;
+    int r = WSAStartup(MAKEWORD(2, 2), &wsa);
+    if (r != 0)
+        throw std::runtime_error("WSAStartup failed: " + win_error(DWORD(r)));
+    done = true;
+}
+
+static SOCKET lbs_sock(const void *impl) {
+    // 0 means unset; store socket+1.
+    return impl ? SOCKET(reinterpret_cast<uintptr_t>(impl) - 1)
+                : INVALID_SOCKET;
+}
+static void *lbs_box(SOCKET s) {
+    return reinterpret_cast<void *>(uintptr_t(s) + 1);
+}
+
+LoopbackServer::LoopbackServer()
+    : impl_(nullptr), port_(0), client_impl_(nullptr)
+{
+    wsa_startup_once();
+    SOCKET s = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (s == INVALID_SOCKET)
+        throw std::runtime_error("socket: " + win_error(DWORD(WSAGetLastError())));
+    BOOL one = TRUE;
+    ::setsockopt(s, SOL_SOCKET, SO_REUSEADDR,
+                 reinterpret_cast<const char *>(&one), sizeof(one));
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.S_un.S_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = 0;
+    if (::bind(s, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0) {
+        int e = WSAGetLastError(); closesocket(s);
+        throw std::runtime_error("bind loopback: " + win_error(DWORD(e)));
+    }
+    sockaddr_in bound{};
+    int blen = int(sizeof(bound));
+    if (::getsockname(s, reinterpret_cast<sockaddr *>(&bound), &blen) != 0) {
+        int e = WSAGetLastError(); closesocket(s);
+        throw std::runtime_error("getsockname: " + win_error(DWORD(e)));
+    }
+    port_ = ntohs(bound.sin_port);
+
+    if (::listen(s, 5) != 0) {
+        int e = WSAGetLastError(); closesocket(s);
+        throw std::runtime_error("listen: " + win_error(DWORD(e)));
+    }
+    impl_ = lbs_box(s);
+}
+
+LoopbackServer::~LoopbackServer()
+{
+    SOCKET c = lbs_sock(client_impl_);
+    if (c != INVALID_SOCKET) closesocket(c);
+    SOCKET s = lbs_sock(impl_);
+    if (s != INVALID_SOCKET) closesocket(s);
+}
+
+int LoopbackServer::port() const { return port_; }
+
+std::string LoopbackServer::accept_request()
+{
+    SOCKET ls = lbs_sock(impl_);
+    SOCKET cs = ::accept(ls, nullptr, nullptr);
+    if (cs == INVALID_SOCKET)
+        throw std::runtime_error("accept: " +
+                                 win_error(DWORD(WSAGetLastError())));
+    client_impl_ = lbs_box(cs);
+
+    std::string buf;
+    char tmp[4096];
+    while (buf.find("\r\n\r\n") == std::string::npos && buf.size() < 16384) {
+        int n = ::recv(cs, tmp, int(sizeof(tmp)), 0);
+        if (n < 0)
+            throw std::runtime_error("recv: " +
+                                     win_error(DWORD(WSAGetLastError())));
+        if (n == 0) break;
+        buf.append(tmp, size_t(n));
+    }
+
+    auto line_end = buf.find("\r\n");
+    std::string line = buf.substr(0, line_end);
+    auto sp1 = line.find(' ');
+    auto sp2 = (sp1 == std::string::npos) ? std::string::npos
+                                          : line.find(' ', sp1 + 1);
+    if (sp1 == std::string::npos || sp2 == std::string::npos)
+        throw std::runtime_error("malformed HTTP request line");
+    return line.substr(sp1 + 1, sp2 - sp1 - 1);
+}
+
+void LoopbackServer::respond(const std::string &html)
+{
+    SOCKET cs = lbs_sock(client_impl_);
+    if (cs == INVALID_SOCKET)
+        throw std::runtime_error("respond() before accept_request()");
+    std::ostringstream resp;
+    resp << "HTTP/1.1 200 OK\r\n"
+         << "Content-Type: text/html; charset=utf-8\r\n"
+         << "Content-Length: " << html.size() << "\r\n"
+         << "Connection: close\r\n\r\n"
+         << html;
+    std::string s = resp.str();
+    const char *p = s.data();
+    int remaining = int(s.size());
+    while (remaining > 0) {
+        int n = ::send(cs, p, remaining, 0);
+        if (n < 0)
+            throw std::runtime_error("send: " +
+                                     win_error(DWORD(WSAGetLastError())));
+        p += n;
+        remaining -= n;
+    }
+    closesocket(cs);
+    client_impl_ = nullptr;
+}
+
+void launch_browser(const std::string &url)
+{
+    auto wurl = to_wide(url);
+    // ShellExecuteW returns a value > 32 on success.
+    HINSTANCE r = ShellExecuteW(nullptr, L"open", wurl.c_str(),
+                                nullptr, nullptr, SW_SHOWNORMAL);
+    if (reinterpret_cast<intptr_t>(r) <= 32)
+        throw std::runtime_error("ShellExecuteW failed for URL: " + url);
+}
+
+std::string config_dir()
+{
+    wchar_t wbuf[MAX_PATH];
+    HRESULT hr = SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr,
+                                  SHGFP_TYPE_CURRENT, wbuf);
+    if (FAILED(hr))
+        throw std::runtime_error("SHGetFolderPathW failed: " +
+                                 win_error(DWORD(hr)));
+
+    // Convert to UTF-8.
+    int n = WideCharToMultiByte(CP_UTF8, 0, wbuf, -1,
+                                nullptr, 0, nullptr, nullptr);
+    std::string base(size_t(n - 1), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, wbuf, -1, base.data(), n, nullptr, nullptr);
+
+    std::string dir = base + "\\aas-sign";
+    std::wstring wdir(dir.begin(), dir.end());
+    if (!CreateDirectoryW(wdir.c_str(), nullptr)) {
+        DWORD err = GetLastError();
+        if (err != ERROR_ALREADY_EXISTS)
+            throw std::runtime_error("CreateDirectoryW " + dir + ": " +
+                                     win_error(err));
+    }
+    return dir;
 }
 
 }  // namespace platform

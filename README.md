@@ -19,35 +19,41 @@ is fetched via FetchContent for TLS and SHA-256.
 
 ### Quick start
 
-Install the [Azure CLI][az-cli] if you don't have it, then:
+    $ aas-sign login                                     # once; opens browser
+    $ aas-sign sign --endpoint <region>.codesigning.azure.net \
+                    --account <account>                      \
+                    --profile <profile>                      \
+                    myapp.exe
 
-    $ az login                                            # once per shell
-    $ aas-sign --endpoint <region>.codesigning.azure.net \
-               --account <account>                       \
-               --profile <profile>                       \
-               --token "$(az account get-access-token    \
-                            --resource https://codesigning.azure.net \
-                            --query accessToken -o tsv)" \
-               myapp.exe
+`aas-sign login` authenticates via the system browser (Microsoft Entra
+Authorization Code + PKCE) and caches a refresh token at
+`~/.config/aas-sign/token-cache.json` (POSIX) or
+`%APPDATA%\aas-sign\token-cache.json` (Windows).  Subsequent
+`aas-sign sign` invocations silently mint fresh access tokens from the
+cache — no Azure CLI required.
 
-Substitute your Trusted Signing region, account name, and certificate
-profile.  A successful run ends with `Signed myapp.exe successfully.`
-and the file is now Authenticode-signed and RFC 3161 timestamped.
-
-[az-cli]: https://learn.microsoft.com/en-us/cli/azure/install-azure-cli
+The cache is revoked if you log out in Entra, the refresh token
+expires (~90 days of inactivity), or you delete the file.  Rerun
+`aas-sign login` to refresh.
 
 ### Full synopsis
 
-    $ aas-sign --endpoint <region>.codesigning.azure.net \
-               --account <account> \
-               --profile <profile> \
-               --token <bearer-token> \
-               [--timestamp-url <url> | --no-timestamp] \
-               [--max-parallel <N>] \
-               [--dump-cms <path>] \
-               <file.exe|file.dll> [<file.exe|file.dll> ...]
+    $ aas-sign sign --endpoint <region>.codesigning.azure.net \
+                    --account <account> \
+                    --profile <profile> \
+                    [--token <bearer-token>] \
+                    [--oidc-client-id <ID> --oidc-tenant-id <ID>] \
+                    [--timestamp-url <url> | --no-timestamp] \
+                    [--max-parallel <N>] \
+                    [--dump-cms <path>] \
+                    <file.exe|file.dll> [<file.exe|file.dll> ...]
 
-The token can also be set via `AZURE_ACCESS_TOKEN`.
+    $ aas-sign login [--tenant <tenant>] [--client-id <id>]
+    $ aas-sign --version | --help
+
+Authentication (first match wins): `--token`, `$AZURE_ACCESS_TOKEN`,
+`--oidc-*` flags (GitHub Actions runner only), cached login from
+`aas-sign login`.
 
 By default, the signature is timestamped against Microsoft's free TSA at
 `http://timestamp.acs.microsoft.com/timestamping/RFC3161`.  This is
@@ -95,7 +101,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - ...                         # your build steps here
-      - uses: skeeto/aas-sign@v0.2.0
+      - uses: skeeto/aas-sign@v0.3.0
         with:
           endpoint:  eus.codesigning.azure.net
           account:   myaccount
@@ -129,7 +135,7 @@ Inputs:
 | `client-id`     | see note | —                                            | Azure app ID for OIDC                  |
 | `tenant-id`     | see note | —                                            | Azure tenant for OIDC                  |
 | `token`         | see note | —                                            | Pre-minted bearer (alternative to OIDC)|
-| `version`       | no       | `v0.2.0`                                     | aas-sign release to install            |
+| `version`       | no       | `v0.3.0`                                     | aas-sign release to install            |
 | `timestamp-url` | no       | Microsoft ACS                                | Override RFC 3161 TSA                  |
 | `no-timestamp`  | no       | `false`                                      | Set `"true"` to skip timestamping      |
 | `max-parallel`  | no       | 8                                            | Concurrent sign operations             |

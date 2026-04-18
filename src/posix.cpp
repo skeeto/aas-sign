@@ -9,14 +9,18 @@
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/error.h>
 
+#include <arpa/inet.h>
 #include <cerrno>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <netdb.h>
+#include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <sstream>
@@ -501,6 +505,170 @@ void write_whole_file(const std::string &utf8_path,
     }
     if (::close(fd) < 0)
         throw std::runtime_error(errno_msg("close", utf8_path));
+}
+
+// --- LoopbackServer / launch_browser / config_dir (OAuth login) ---
+
+static int lbs_fd(const void *impl) {
+    return int(reinterpret_cast<intptr_t>(impl)) - 1;  // 0 means unset
+}
+static void *lbs_box(int fd) {
+    return reinterpret_cast<void *>(intptr_t(fd + 1));
+}
+
+LoopbackServer::LoopbackServer()
+    : impl_(nullptr), port_(0), client_impl_(nullptr)
+{
+    int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0)
+        throw std::runtime_error(std::string("socket: ") + std::strerror(errno));
+    int one = 1;
+    ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = 0;  // OS assigns
+    if (::bind(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) < 0) {
+        int e = errno; ::close(fd); errno = e;
+        throw std::runtime_error(std::string("bind loopback: ") +
+                                 std::strerror(errno));
+    }
+    sockaddr_in bound{};
+    socklen_t blen = sizeof(bound);
+    if (::getsockname(fd, reinterpret_cast<sockaddr *>(&bound), &blen) < 0) {
+        int e = errno; ::close(fd); errno = e;
+        throw std::runtime_error(std::string("getsockname: ") +
+                                 std::strerror(errno));
+    }
+    port_ = ntohs(bound.sin_port);
+
+    if (::listen(fd, 5) < 0) {
+        int e = errno; ::close(fd); errno = e;
+        throw std::runtime_error(std::string("listen: ") +
+                                 std::strerror(errno));
+    }
+    impl_ = lbs_box(fd);
+}
+
+LoopbackServer::~LoopbackServer()
+{
+    int cfd = lbs_fd(client_impl_);
+    if (cfd >= 0) ::close(cfd);
+    int fd = lbs_fd(impl_);
+    if (fd >= 0) ::close(fd);
+}
+
+int LoopbackServer::port() const { return port_; }
+
+std::string LoopbackServer::accept_request()
+{
+    int lfd = lbs_fd(impl_);
+    int cfd = ::accept(lfd, nullptr, nullptr);
+    if (cfd < 0)
+        throw std::runtime_error(std::string("accept: ") +
+                                 std::strerror(errno));
+    client_impl_ = lbs_box(cfd);
+
+    // Read until end-of-headers; we only need the first line in
+    // practice.  Cap at 16 KB to bound memory for pathological
+    // clients.
+    std::string buf;
+    char tmp[4096];
+    while (buf.find("\r\n\r\n") == std::string::npos && buf.size() < 16384) {
+        ssize_t n = ::read(cfd, tmp, sizeof(tmp));
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            throw std::runtime_error(std::string("read: ") +
+                                     std::strerror(errno));
+        }
+        if (n == 0) break;
+        buf.append(tmp, size_t(n));
+    }
+
+    // Extract "METHOD target HTTP/..." from the first line.
+    auto line_end = buf.find("\r\n");
+    std::string line = buf.substr(0, line_end);
+    auto sp1 = line.find(' ');
+    auto sp2 = (sp1 == std::string::npos) ? std::string::npos
+                                          : line.find(' ', sp1 + 1);
+    if (sp1 == std::string::npos || sp2 == std::string::npos)
+        throw std::runtime_error("malformed HTTP request line");
+    return line.substr(sp1 + 1, sp2 - sp1 - 1);
+}
+
+void LoopbackServer::respond(const std::string &html)
+{
+    int cfd = lbs_fd(client_impl_);
+    if (cfd < 0)
+        throw std::runtime_error("respond() before accept_request()");
+    std::ostringstream resp;
+    resp << "HTTP/1.1 200 OK\r\n"
+         << "Content-Type: text/html; charset=utf-8\r\n"
+         << "Content-Length: " << html.size() << "\r\n"
+         << "Connection: close\r\n\r\n"
+         << html;
+    std::string s = resp.str();
+    const char *p = s.data();
+    size_t remaining = s.size();
+    while (remaining > 0) {
+        ssize_t n = ::write(cfd, p, remaining);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            throw std::runtime_error(std::string("write: ") +
+                                     std::strerror(errno));
+        }
+        p += n;
+        remaining -= size_t(n);
+    }
+    ::close(cfd);
+    client_impl_ = nullptr;
+}
+
+void launch_browser(const std::string &url)
+{
+    // Prefer xdg-open (Linux/BSD) and open (macOS).  fork + execvp so
+    // the browser runs asynchronously and we don't block on it.
+    pid_t pid = ::fork();
+    if (pid < 0)
+        throw std::runtime_error(std::string("fork: ") +
+                                 std::strerror(errno));
+    if (pid == 0) {
+        // Child.  Try xdg-open then open.  exec* returns only on error.
+        const char *openers[] = { "xdg-open", "open", nullptr };
+        for (int i = 0; openers[i]; i++) {
+            char *argv[] = {
+                const_cast<char *>(openers[i]),
+                const_cast<char *>(url.c_str()),
+                nullptr
+            };
+            ::execvp(argv[0], argv);
+        }
+        _exit(127);
+    }
+    // Parent: reap on next waitpid non-blocking attempt later;
+    // SIGCHLD default is fine.  Don't block.
+    (void)pid;
+}
+
+std::string config_dir()
+{
+    std::string base;
+    if (const char *xdg = std::getenv("XDG_CONFIG_HOME"); xdg && *xdg) {
+        base = xdg;
+    } else if (const char *home = std::getenv("HOME"); home && *home) {
+        base = std::string(home) + "/.config";
+    } else {
+        throw std::runtime_error(
+            "cannot determine config dir: neither XDG_CONFIG_HOME nor HOME set");
+    }
+    // Ensure base exists (don't clobber if it already does).
+    ::mkdir(base.c_str(), 0700);
+    std::string dir = base + "/aas-sign";
+    if (::mkdir(dir.c_str(), 0700) < 0 && errno != EEXIST)
+        throw std::runtime_error(std::string("mkdir ") + dir + ": " +
+                                 std::strerror(errno));
+    return dir;
 }
 
 }  // namespace platform

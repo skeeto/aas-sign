@@ -77,5 +77,47 @@ private:
 void write_whole_file(const std::string &utf8_path,
                       const uint8_t *data, size_t len);
 
+// Loopback HTTP server used for the OAuth redirect in `aas-sign login`.
+// Binds to 127.0.0.1 on an OS-assigned port, accepts exactly one
+// connection, reads one HTTP request line, and sends one response.
+//
+// The caller reads the request path+query via accept_request() and
+// then calls respond() with a tiny HTML body to display in the
+// browser.  Single-use; destroy + construct fresh for another round.
+class LoopbackServer {
+public:
+    LoopbackServer();
+    ~LoopbackServer();
+    LoopbackServer(const LoopbackServer &) = delete;
+    LoopbackServer &operator=(const LoopbackServer &) = delete;
+
+    int port() const;
+    // Accept one connection, read the request.  Returns the request
+    // target (the "/foo?bar=baz" part of "GET /foo?bar=baz HTTP/1.1").
+    // Throws on IO error.
+    std::string accept_request();
+    // Send a minimal 200 OK response with the given HTML body, then
+    // close.  Must be called after accept_request().
+    void respond(const std::string &html);
+
+private:
+    void *impl_;  // fd (POSIX) or SOCKET (Windows), boxed via intptr_t
+    int  port_;
+    void *client_impl_;  // fd/SOCKET of the accepted client connection
+};
+
+// Launch the system's default web browser on the given URL.  Returns
+// immediately; does not wait for the browser to exit.  Used for the
+// OAuth authorize-URL redirect in `aas-sign login`.  Throws on fork/
+// ShellExecute failure.
+void launch_browser(const std::string &url);
+
+// Return the per-user config directory aas-sign should use, creating
+// it (with parent directories, 0700 perms on POSIX) if needed:
+//   POSIX:   ${XDG_CONFIG_HOME:-$HOME/.config}/aas-sign
+//   Windows: %APPDATA%\aas-sign
+// Throws if neither is available.
+std::string config_dir();
+
 }  // namespace platform
 
