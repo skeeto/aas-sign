@@ -7,7 +7,15 @@ on:
 
 permissions:
   contents: write   # create release + upload assets
-  id-token: write   # OIDC federation for azure/login@v2
+  id-token: write   # OIDC federation for the Azure token exchange
+
+# Opt JavaScript actions into Node.js 24.  actions/{checkout,upload-artifact,
+# download-artifact}@v5 still ship a Node 20 runtime as of this writing;
+# GitHub makes Node 24 the default in June 2026 and removes Node 20 in
+# September 2026.  This flag suppresses the deprecation warning and gets
+# us on Node 24 now.  Remove once the v5 actions ship Node 24 natively.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build-linux:
