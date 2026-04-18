@@ -36,20 +36,48 @@ release; bootstraps cleanly from the first tag.  No macOS build.
 ## Architecture
 
 ```
-main.cpp        CLI, worker pool, orchestrates per-file signing flow
-pe.cpp          PE parsing, Authenticode hash, checksum, signature injection
-der.cpp         DER/ASN.1 encoding primitives (build-and-wrap, no parsing)
-cms.cpp         CMS/Authenticode structure assembly (SignedData v1)
-x509.cpp        Minimal X.509 parser (issuer DN + serial, CMS cert splitting)
-azure.cpp       Azure Trusted Signing REST client (POST + poll loop)
-tsa.cpp         RFC 3161 TimeStampReq builder and TimeStampResp parser
-base64.cpp      Base64 encode/decode
-sha256.hpp      Platform abstraction interface (SHA-256, HTTPS, plain HTTP, File)
-posix.cpp       POSIX impl: mbedTLS SHA-256, raw TLS HTTPS, TCP socket HTTP
-win32.cpp       Windows impl: BCrypt SHA-256, WinHTTP (TLS + plain)
+main.cpp         CLI + subcommand dispatch + worker pool
+pe.cpp           PE parsing, Authenticode hash, checksum, signature injection
+der.cpp          DER/ASN.1 encoding primitives (build-and-wrap, no parsing)
+cms.cpp          CMS/Authenticode structure assembly (SignedData v1)
+x509.cpp         Minimal X.509 parser (issuer DN + serial, CMS cert splitting)
+azure.cpp        Azure Trusted Signing REST client (POST + poll loop)
+tsa.cpp          RFC 3161 TimeStampReq builder and TimeStampResp parser
+oidc.cpp         CI-path OIDC exchange (GitHub Actions runner → Azure token)
+auth_laptop.cpp  Laptop-path OAuth login (browser + PKCE) + refresh cache
+base64.cpp       Base64 / base64url encode/decode
+urlenc.cpp       RFC 3986 percent-encoder
+sha256.hpp       Platform abstraction interface (everything below)
+posix.cpp        POSIX impl: mbedTLS SHA-256, raw TLS HTTPS, TCP sockets,
+                 open/pread/pwrite, /dev/urandom, xdg-open
+win32.cpp        Windows impl: BCrypt, WinHTTP, WinSock, CreateFileW,
+                 ShellExecuteW, SHGetFolderPathW
 ```
 
 Platform-specific sources are selected by CMake generator expressions.
+
+### Platform-layer paradigm (no #ifdef in feature code)
+
+All OS-specific code — file I/O, sockets, crypto, HTTPS, browser
+launch, per-user config directory lookup, atomic file replace, etc. —
+lives behind `namespace platform` in `sha256.hpp` and is implemented
+independently in `posix.cpp` and `win32.cpp`.  Feature modules
+(`auth_laptop.cpp`, `pe.cpp`, `cms.cpp`, …) are pure C++17/20 with no
+`#ifdef _WIN32` blocks, no `<windows.h>` includes, no POSIX-specific
+syscalls.
+
+When adding a new feature that needs OS-specific behaviour, don't
+reach for `#ifdef _WIN32` in the feature file.  Extend `sha256.hpp`
+with a new function or class (follow the `File`, `LoopbackServer`,
+`atomic_write_private_file` shape), implement it twice (posix.cpp
+and win32.cpp), and call the abstraction from the feature code.
+Each implementation handles errors via `throw std::runtime_error`
+with a message that includes the path/URL/operation and the
+underlying errno / GetLastError in human-readable form.
+
+The payoff: feature modules read cleanly on both platforms, and the
+two platform files carry all the "this is how Windows does things"
+knowledge in one place where it can be reviewed as a unit.
 
 ## Signing flow
 
