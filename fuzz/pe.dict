@@ -1,0 +1,17 @@
+# libFuzzer dictionary for the PE parser.  Tokens here get injected
+# into mutations, making it likely that randomly-generated inputs
+# retain the magic values our parser checks for.
+#
+# Pass to the fuzzer with  -dict=fuzz/pe.dict
+
+# DOS header magic
+"MZ"
+
+# PE signature
+"PE\x00\x00"
+
+# PE32 optional-header magic (0x10b, little-endian)
+"\x0b\x01"
+
+# PE32+ optional-header magic (0x20b, little-endian)
+"\x0b\x02"

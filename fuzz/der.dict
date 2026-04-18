@@ -1,0 +1,38 @@
+# libFuzzer dictionary for DER-parsing fuzzers (x509, tsa, der_tlv).
+# These are the ASN.1 universal-class tags the parsers check against,
+# plus a couple of common context-specific tags from X.509 / CMS.
+#
+# Pass to the fuzzer with  -dict=fuzz/der.dict
+
+# INTEGER
+"\x02"
+# BIT STRING
+"\x03"
+# OCTET STRING
+"\x04"
+# NULL
+"\x05\x00"
+# OBJECT IDENTIFIER
+"\x06"
+# UTF8String
+"\x0c"
+# PrintableString
+"\x13"
+# UTCTime
+"\x17"
+# GeneralizedTime
+"\x18"
+# SEQUENCE
+"\x30"
+# SET
+"\x31"
+# [0] context-specific constructed
+"\xa0"
+# [3] context-specific constructed (X.509 extensions)
+"\xa3"
+
+# Long-form length headers
+# 128 bytes follow
+"\x81\x80"
+# 256 bytes follow
+"\x82\x01\x00"

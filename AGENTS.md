@@ -30,13 +30,29 @@ libc++):
     cmake -B build-fuzz -DAAS_SIGN_FUZZ=ON \
         -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
     cmake --build build-fuzz
-    ./build-fuzz/fuzz_x509_cert_id -max_total_time=60
+    ./build-fuzz/fuzz_pe -dict=fuzz/pe.dict -max_total_time=60 fuzz/corpus/pe/
 
 Targets: `fuzz_pe`, `fuzz_x509_cert_id`, `fuzz_x509_split_certs`,
 `fuzz_der_tlv`, `fuzz_tsa_parse`.  Each harness catches
 `std::exception` so the rejection path is not a finding; libFuzzer
 only flags sanitizer fires and real crashes.  We assume mbedTLS and
 nlohmann/json are fuzzed upstream.
+
+Seed corpora and dictionaries live next to the harnesses:
+
+| harness | seeds | dict |
+|---|---|---|
+| `fuzz_pe` | `fuzz/corpus/pe/` (minimal PE32 + PE32+ stubs) | `fuzz/pe.dict` |
+| `fuzz_x509_cert_id` | `fuzz/corpus/x509_cert_id/` (self-signed DER cert) | `fuzz/der.dict` |
+| `fuzz_x509_split_certs` | `fuzz/corpus/x509_split_certs/` | `fuzz/der.dict` |
+| `fuzz_der_tlv` | — | `fuzz/der.dict` |
+| `fuzz_tsa_parse` | — | `fuzz/der.dict` |
+
+Without the seed corpus, `fuzz_pe` burns most of its budget failing
+the MZ/PE signature checks -- the provided stubs pass the
+constructor and land the fuzzer inside `authenticode_hash()`.  Pass
+the matching dict + corpus every run so mutations preserve the
+magic bytes our parsers check.
 
 ## Distribution
 
