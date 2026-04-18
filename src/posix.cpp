@@ -507,6 +507,37 @@ void write_whole_file(const std::string &utf8_path,
         throw std::runtime_error(errno_msg("close", utf8_path));
 }
 
+void atomic_write_private_file(const std::string &utf8_path,
+                               const uint8_t *data, size_t len)
+{
+    std::string tmp = utf8_path + ".tmp";
+    int fd = ::open(tmp.c_str(),
+                    O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    if (fd < 0)
+        throw std::runtime_error(errno_msg("open(write)", tmp));
+    size_t off = 0;
+    while (off < len) {
+        ssize_t n = ::write(fd, data + off, len - off);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            int saved = errno; ::close(fd); errno = saved;
+            throw std::runtime_error(errno_msg("write", tmp));
+        }
+        off += size_t(n);
+    }
+    ::fsync(fd);
+    if (::close(fd) < 0)
+        throw std::runtime_error(errno_msg("close", tmp));
+    if (::rename(tmp.c_str(), utf8_path.c_str()) < 0)
+        throw std::runtime_error(errno_msg("rename", utf8_path));
+}
+
+void remove_file(const std::string &utf8_path)
+{
+    if (::unlink(utf8_path.c_str()) < 0 && errno != ENOENT)
+        throw std::runtime_error(errno_msg("unlink", utf8_path));
+}
+
 // --- LoopbackServer / launch_browser / config_dir (OAuth login) ---
 
 static int lbs_fd(const void *impl) {

@@ -547,6 +547,53 @@ void write_whole_file(const std::string &utf8_path,
                                  win_error(GetLastError()));
 }
 
+void atomic_write_private_file(const std::string &utf8_path,
+                               const uint8_t *data, size_t len)
+{
+    std::string tmp = utf8_path + ".tmp";
+    auto wtmp = utf8_to_wide(tmp);
+    HANDLE h = CreateFileW(wtmp.c_str(), GENERIC_WRITE, 0, nullptr,
+                           CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE)
+        throw std::runtime_error("open(write) " + tmp + ": " +
+                                 win_error(GetLastError()));
+    const uint8_t *p = data;
+    size_t remaining = len;
+    while (remaining > 0) {
+        DWORD chunk = DWORD(remaining > 0x40000000u ? 0x40000000u : remaining);
+        DWORD wrote = 0;
+        if (!WriteFile(h, p, chunk, &wrote, nullptr)) {
+            DWORD err = GetLastError();
+            CloseHandle(h);
+            throw std::runtime_error("WriteFile " + tmp + ": " +
+                                     win_error(err));
+        }
+        p += wrote;
+        remaining -= wrote;
+    }
+    if (!CloseHandle(h))
+        throw std::runtime_error("CloseHandle " + tmp + ": " +
+                                 win_error(GetLastError()));
+
+    auto wfinal = utf8_to_wide(utf8_path);
+    if (!MoveFileExW(wtmp.c_str(), wfinal.c_str(),
+                     MOVEFILE_REPLACE_EXISTING))
+        throw std::runtime_error("MoveFileExW " + utf8_path + ": " +
+                                 win_error(GetLastError()));
+}
+
+void remove_file(const std::string &utf8_path)
+{
+    auto wpath = utf8_to_wide(utf8_path);
+    if (!DeleteFileW(wpath.c_str())) {
+        DWORD err = GetLastError();
+        if (err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND)
+            return;  // already absent; treat as success
+        throw std::runtime_error("DeleteFileW " + utf8_path + ": " +
+                                 win_error(err));
+    }
+}
+
 // --- LoopbackServer / launch_browser / config_dir (OAuth login) ---
 
 // Lazy one-time WSAStartup.  Safe to call many times.

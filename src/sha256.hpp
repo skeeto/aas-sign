@@ -77,6 +77,20 @@ private:
 void write_whole_file(const std::string &utf8_path,
                       const uint8_t *data, size_t len);
 
+// Atomically create or replace `utf8_path` with exactly `len` bytes of
+// `data`.  Written via a sibling tempfile + rename, so a concurrent
+// reader sees either the old contents or the new -- never a torn
+// write.  POSIX: tempfile is created mode 0600 (user-only), fsync
+// before rename.  Windows: relies on NTFS default ACL, which is
+// already per-user under %APPDATA%.  Used for token caches and similar
+// private per-user files.
+void atomic_write_private_file(const std::string &utf8_path,
+                               const uint8_t *data, size_t len);
+
+// Delete `utf8_path` if it exists; no-op if missing.  Throws on other
+// errors (permission denied, etc.).
+void remove_file(const std::string &utf8_path);
+
 // Loopback HTTP server used for the OAuth redirect in `aas-sign login`.
 // Binds to 127.0.0.1 on an OS-assigned port, accepts exactly one
 // connection, reads one HTTP request line, and sends one response.

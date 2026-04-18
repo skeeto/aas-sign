@@ -16,14 +16,6 @@
 #include <stdexcept>
 #include <string>
 
-#ifdef _WIN32
-#  include <windows.h>
-#else
-#  include <fcntl.h>
-#  include <sys/stat.h>
-#  include <unistd.h>
-#endif
-
 using json = nlohmann::json;
 
 namespace {
@@ -150,76 +142,23 @@ json read_cache()
     }
 }
 
-// Write `body` to `final` via a tempfile + atomic rename.  On POSIX
-// the tempfile is created mode 0600 (these files contain secrets and
-// per-user defaults).  On Windows, default ACL per-user is sufficient.
-static void atomic_write_string(const std::string &final,
-                                const std::string &body)
+static void atomic_write_json(const std::string &path, const json &j)
 {
-    std::string tmp = final + ".tmp";
-
-#ifdef _WIN32
-    int n = MultiByteToWideChar(CP_UTF8, 0, tmp.c_str(), -1,
-                                nullptr, 0);
-    std::wstring wtmp(size_t(n - 1), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, tmp.c_str(), -1, wtmp.data(), n);
-    HANDLE h = CreateFileW(wtmp.c_str(), GENERIC_WRITE, 0, nullptr,
-                           CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (h == INVALID_HANDLE_VALUE)
-        throw std::runtime_error("open " + tmp + ": Win32 error " +
-                                 std::to_string(GetLastError()));
-    DWORD wrote = 0;
-    WriteFile(h, body.data(), DWORD(body.size()), &wrote, nullptr);
-    CloseHandle(h);
-
-    int n2 = MultiByteToWideChar(CP_UTF8, 0, final.c_str(), -1,
-                                 nullptr, 0);
-    std::wstring wfinal(size_t(n2 - 1), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, final.c_str(), -1, wfinal.data(), n2);
-    if (!MoveFileExW(wtmp.c_str(), wfinal.c_str(),
-                     MOVEFILE_REPLACE_EXISTING))
-        throw std::runtime_error("MoveFileExW " + final + ": Win32 error " +
-                                 std::to_string(GetLastError()));
-#else
-    int fd = ::open(tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
-    if (fd < 0)
-        throw std::runtime_error(std::string("open ") + tmp + ": " +
-                                 std::strerror(errno));
-    size_t off = 0;
-    while (off < body.size()) {
-        ssize_t n = ::write(fd, body.data() + off, body.size() - off);
-        if (n < 0) {
-            if (errno == EINTR) continue;
-            int e = errno; ::close(fd); errno = e;
-            throw std::runtime_error(std::string("write: ") +
-                                     std::strerror(errno));
-        }
-        off += size_t(n);
-    }
-    ::fsync(fd);
-    ::close(fd);
-    if (::rename(tmp.c_str(), final.c_str()) < 0)
-        throw std::runtime_error(std::string("rename: ") +
-                                 std::strerror(errno));
-#endif
+    std::string body = j.dump(2);
+    platform::atomic_write_private_file(
+        path,
+        reinterpret_cast<const uint8_t *>(body.data()),
+        body.size());
 }
 
 void write_cache(const json &j)
 {
-    atomic_write_string(cache_path(), j.dump(2));
+    atomic_write_json(cache_path(), j);
 }
 
 void delete_cache()
 {
-    std::string p = cache_path();
-#ifdef _WIN32
-    int n = MultiByteToWideChar(CP_UTF8, 0, p.c_str(), -1, nullptr, 0);
-    std::wstring wp(size_t(n - 1), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, p.c_str(), -1, wp.data(), n);
-    DeleteFileW(wp.c_str());
-#else
-    ::unlink(p.c_str());
-#endif
+    platform::remove_file(cache_path());
 }
 
 // ----- Token endpoints -------------------------------------------------
@@ -428,7 +367,7 @@ int login_main(int argc, char **argv)
         if (!cfg_endpoint.empty()) cfg["endpoint"] = cfg_endpoint;
         if (!cfg_account.empty())  cfg["account"]  = cfg_account;
         if (!cfg_profile.empty())  cfg["profile"]  = cfg_profile;
-        atomic_write_string(cfg_path, cfg.dump(2));
+        atomic_write_json(cfg_path, cfg);
         std::cerr << "Saved signing defaults to " << cfg_path << '\n';
     }
 
