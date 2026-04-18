@@ -30,6 +30,7 @@ static void usage_short(std::ostream &os, const char *argv0)
 {
     os << "usage: " << argv0 << " sign [options] FILE [FILE ...]\n"
        << "       " << argv0 << " login [--tenant T] [--client-id C]\n"
+       << "       " << argv0 << " logout\n"
        << "Try `" << argv0 << " --help' for more information.\n";
 }
 
@@ -38,6 +39,7 @@ static void usage_full(const char *argv0)
     std::cout
         << "usage: " << argv0 << " sign [options] FILE [FILE ...]\n"
         << "       " << argv0 << " login [--tenant T] [--client-id C]\n"
+        << "       " << argv0 << " logout\n"
         << "       " << argv0 << " --version | --help\n"
         << "\n"
         << "Sign PE images (EXE, DLL) via Azure Artifact Signing "
@@ -49,6 +51,7 @@ static void usage_full(const char *argv0)
         << "                       token under ${XDG_CONFIG_HOME:-~/.config}/\n"
         << "                       aas-sign (or %APPDATA%\\aas-sign on Windows).\n"
         << "                       Subsequent `sign` runs then use the cache.\n"
+        << "  logout               Delete the cached refresh token.\n"
         << "\n"
         << "sign options:\n"
         << "  --endpoint HOST      Azure Trusted Signing endpoint hostname,\n"
@@ -423,6 +426,8 @@ int aas_sign_main(int argc, char **argv)
         return sign_main(argc, argv);
     if (!strcmp(argv[1], "login"))
         return login_main(argc, argv);
+    if (!strcmp(argv[1], "logout"))
+        return logout_main(argc, argv);
 
     std::cerr << argv[0] << ": unknown subcommand: " << argv[1] << '\n';
     usage_short(std::cerr, argv[0]);

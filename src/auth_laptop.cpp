@@ -449,3 +449,37 @@ std::string try_cached_refresh()
     }
     return access_token;
 }
+
+// ----- Logout ----------------------------------------------------------
+
+int logout_main(int argc, char **argv)
+{
+    for (int i = 2; i < argc; i++) {  // argv[1] == "logout"
+        if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
+            std::cout
+                << "usage: aas-sign logout\n"
+                << "\n"
+                << "Delete the local refresh-token cache at\n"
+                << "    " << cache_path() << "\n"
+                << "\n"
+                << "This only removes the local cache; the refresh token\n"
+                << "remains valid on Microsoft's side until its natural\n"
+                << "expiry (~90 days of inactivity) or until an admin\n"
+                << "revokes it in the Entra portal.\n";
+            return 0;
+        }
+        std::cerr << "aas-sign logout: unknown option: " << argv[i] << '\n';
+        return 1;
+    }
+
+    std::string p = cache_path();
+    std::ifstream test(p);
+    if (test) {
+        test.close();
+        delete_cache();
+        std::cerr << "Logged out (removed " << p << ").\n";
+    } else {
+        std::cerr << "Not logged in (no cache at " << p << ").\n";
+    }
+    return 0;
+}

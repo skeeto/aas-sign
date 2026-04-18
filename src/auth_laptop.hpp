@@ -37,6 +37,11 @@ constexpr const char AAS_SIGN_DEFAULT_TENANT[] =
 // + PKCE against Microsoft Entra, writes a refresh-token cache.
 int login_main(int argc, char **argv);
 
+// Run the `aas-sign logout` subcommand: delete the local token cache.
+// Does not revoke the token server-side (Entra doesn't expose a
+// public revocation endpoint for this flow).
+int logout_main(int argc, char **argv);
+
 // Attempt to read the cached refresh token and exchange it for a
 // fresh access token for the codesigning.azure.net scope.  Returns
 // the empty string if no cache exists; throws std::runtime_error on
