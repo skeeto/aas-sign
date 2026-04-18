@@ -80,7 +80,9 @@ x509.cpp         Minimal X.509 parser (issuer DN + serial, CMS cert splitting)
 azure.cpp        Azure Trusted Signing REST client (POST + poll loop)
 tsa.cpp          RFC 3161 TimeStampReq builder and TimeStampResp parser
 oidc.cpp         CI-path OIDC exchange (GitHub Actions runner → Azure token)
-auth_laptop.cpp  Laptop-path OAuth login (browser + PKCE) + refresh cache
+auth_laptop.cpp  Laptop-path OAuth login (browser + PKCE) + refresh cache;
+                 also hosts `logout` (delete cache) and `config`
+                 (write signing defaults to config.json without auth)
 base64.cpp       Base64 / base64url encode/decode
 urlenc.cpp       RFC 3986 percent-encoder
 platform.hpp     Platform abstraction interface (everything below)

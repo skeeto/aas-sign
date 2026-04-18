@@ -40,7 +40,14 @@ expires (~90 days of inactivity), or you delete the file (or run
 You can also pass `--endpoint`/`--account`/`--profile` directly to
 `aas-sign sign` each time (they override `config.json`), or create
 `config.json` by hand — `login`'s role in writing it is just a
-first-run convenience.
+first-run convenience.  To update the defaults later without
+re-authenticating (e.g. pointing at a different region), use
+`aas-sign config` with the same three flags:
+
+    $ aas-sign config --endpoint <other-region>.codesigning.azure.net
+
+It has the same merge semantics — only the fields you pass are
+updated; the rest stay as they were.
 
 ### Full synopsis
 
@@ -54,7 +61,10 @@ first-run convenience.
                     [--dump-cms <path>] \
                     <file.exe|file.dll> [<file.exe|file.dll> ...]
 
-    $ aas-sign login [--tenant <tenant>] [--client-id <id>]
+    $ aas-sign login [--tenant <tenant>] [--client-id <id>] \
+                     [--endpoint <H> --account <N> --profile <P>]
+    $ aas-sign logout
+    $ aas-sign config [--endpoint <H>] [--account <N>] [--profile <P>]
     $ aas-sign --version | --help
 
 Authentication (first match wins): `--token`, `$AZURE_ACCESS_TOKEN`,
