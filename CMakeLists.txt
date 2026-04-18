@@ -22,6 +22,10 @@ if(NOT WIN32)
   set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
   set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
   set(MBEDTLS_AS_SUBPROJECT ON CACHE BOOL "" FORCE)
+  # mbedTLS 3.6.2 enables -Werror by default and newer clang (>=19)
+  # adds diagnostics that trip it.  We don't need mbedTLS to be that
+  # strict for our consumer-level use.
+  set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
   FetchContent_Declare(mbedtls
     URL                     https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.2/mbedtls-3.6.2.tar.bz2
     URL_HASH                SHA256=8b54fb9bcf4d5a7078028e0520acddefb7900b3e66fec7f7175bb5b7d85ccdca
@@ -75,11 +79,10 @@ else()
     mbedcrypto)
 endif()
 
-# libFuzzer harnesses.  Built only when explicitly requested, and only
-# on Linux + Clang -- libFuzzer ships with Clang, and we rely on the
-# POSIX platform bits.  Detection of libstdc++ vs libc++ and the
+# libFuzzer harnesses.  Built only when explicitly requested; requires
+# Clang (for libFuzzer).  Detection of libstdc++ vs libc++ and the
 # per-harness add_executable wiring live in cmake/Fuzzing.cmake.
-option(AAS_SIGN_FUZZ "Build libFuzzer harnesses (Linux+Clang only)" OFF)
+option(AAS_SIGN_FUZZ "Build libFuzzer harnesses (Clang-only, POSIX)" OFF)
 
 if(AAS_SIGN_FUZZ)
   list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")

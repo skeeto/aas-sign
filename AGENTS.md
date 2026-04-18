@@ -21,8 +21,11 @@ APIs (BCrypt, WinHTTP). pthreads on POSIX, winpthreads on MinGW.
 ## Fuzzing
 
 Hand-rolled byte parsers (`pe.cpp`, `x509.cpp`, `tsa.cpp`) have
-libFuzzer harnesses under `fuzz/`.  Not built by default.  Linux +
-Clang only, with ASan + UBSan + `-D_GLIBCXX_DEBUG`:
+libFuzzer harnesses under `fuzz/`.  Not built by default.  Clang
+only (libFuzzer ships with it), POSIX (Linux + macOS).  Applies
+ASan + UBSan and the matching stdlib debug mode
+(`_GLIBCXX_DEBUG` on libstdc++, `_LIBCPP_HARDENING_MODE_DEBUG` on
+libc++):
 
     cmake -B build-fuzz -DAAS_SIGN_FUZZ=ON \
         -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++

@@ -730,7 +730,11 @@ std::string config_dir()
 // --- Entry point ---
 
 // POSIX argv is UTF-8 under any modern locale.  Forward as-is.
+// libFuzzer harnesses provide their own main(), so skip this one when
+// AAS_SIGN_NO_MAIN is defined (set by cmake/Fuzzing.cmake).
+#ifndef AAS_SIGN_NO_MAIN
 int main(int argc, char **argv)
 {
     return aas_sign_main(argc, argv);
 }
+#endif

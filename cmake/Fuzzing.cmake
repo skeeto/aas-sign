@@ -1,14 +1,15 @@
 # cmake/Fuzzing.cmake
 #
 # libFuzzer harness wiring.  Included from the top-level CMakeLists
-# only when AAS_SIGN_FUZZ=ON.  Requires Linux + Clang.  Applies ASan
-# + UBSan and the stdlib's debug-mode hardening (detected below).
+# only when AAS_SIGN_FUZZ=ON.  Requires Clang (libFuzzer ships with
+# it).  Tested on Linux + macOS; Windows is out of scope.  Applies
+# ASan + UBSan and the stdlib's debug-mode hardening (detected below).
 
-if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  message(FATAL_ERROR "AAS_SIGN_FUZZ requires Linux")
-endif()
 if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   message(FATAL_ERROR "AAS_SIGN_FUZZ requires Clang (libFuzzer)")
+endif()
+if(WIN32)
+  message(FATAL_ERROR "AAS_SIGN_FUZZ is not supported on Windows")
 endif()
 
 # --- stdlib detection --------------------------------------------------
@@ -73,7 +74,8 @@ function(aas_sign_add_fuzz_target name)
     ${CMAKE_SOURCE_DIR}/src
     ${mbedtls_SOURCE_DIR}/include)
   target_compile_options(${name} PRIVATE ${_aas_fuzz_flags})
-  target_compile_definitions(${name} PRIVATE ${_aas_fuzz_defs})
+  target_compile_definitions(${name} PRIVATE ${_aas_fuzz_defs}
+                                             AAS_SIGN_NO_MAIN)
   target_link_options(${name} PRIVATE ${_aas_fuzz_flags})
   target_link_libraries(${name} PRIVATE
     nlohmann_json::nlohmann_json
