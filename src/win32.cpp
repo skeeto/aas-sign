@@ -82,12 +82,71 @@ void write_stderr(std::string_view bytes)
     write_handle_all(STD_ERROR_HANDLE, bytes);
 }
 
+// Render a Win32 error code with the system's message, when there is
+// one, via FormatMessage.  Most codes (CreateFileW, WinSock, Shell32,
+// ShellExecuteW's SE_ERR_* codes) live in the system message table.
+// WinHTTP's 12000-12175 range lives in winhttp.dll's private table,
+// so consult it too -- otherwise ERROR_WINHTTP_SECURE_FAILURE (12175)
+// would render as bare "Win32 error 12175" with no context.
+static std::string win_error(DWORD code)
+{
+    static HMODULE winhttp = LoadLibraryW(L"winhttp.dll");
+
+    LPWSTR buf = nullptr;
+    DWORD flags = FORMAT_MESSAGE_FROM_SYSTEM |
+                  FORMAT_MESSAGE_IGNORE_INSERTS |
+                  FORMAT_MESSAGE_ALLOCATE_BUFFER;
+    HMODULE module = nullptr;
+    if (code >= 12000 && code <= 12175 && winhttp) {
+        flags |= FORMAT_MESSAGE_FROM_HMODULE;
+        module = winhttp;
+    }
+    DWORD n = FormatMessageW(flags, module, code,
+                             MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                             reinterpret_cast<LPWSTR>(&buf), 0, nullptr);
+
+    std::ostringstream s;
+    s << "Win32 error " << code;
+    if (n > 0 && buf) {
+        // Strip trailing CR/LF/period/space -- FormatMessage typically
+        // appends ".\r\n" which reads oddly inside our own sentence.
+        while (n > 0 && (buf[n-1] == L'\r' || buf[n-1] == L'\n' ||
+                         buf[n-1] == L'.'  || buf[n-1] == L' '))
+            buf[--n] = 0;
+        if (n > 0) {
+            int u = WideCharToMultiByte(CP_UTF8, 0, buf, int(n),
+                                        nullptr, 0, nullptr, nullptr);
+            if (u > 0) {
+                std::string utf8(size_t(u), '\0');
+                WideCharToMultiByte(CP_UTF8, 0, buf, int(n),
+                                    utf8.data(), u, nullptr, nullptr);
+                s << " (" << utf8 << ")";
+            }
+        }
+    }
+    if (buf) LocalFree(buf);
+    return s.str();
+}
+
+// BCrypt returns NTSTATUS (0 on success, negative on failure).  Render
+// as the raw hex code; FormatMessage with FROM_SYSTEM doesn't cleanly
+// map NTSTATUS values, and RtlNtStatusToDosError would require linking
+// ntdll -- not worth the ceremony for a handful of call sites that
+// practically never fail.
+static std::string nt_error(LONG status)
+{
+    std::ostringstream s;
+    s << "NTSTATUS 0x" << std::hex << uint32_t(status);
+    return s.str();
+}
+
 Sha256::Sha256()
 {
     BCRYPT_ALG_HANDLE alg;
-    if (BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM,
-                                   nullptr, 0) != 0)
-        throw std::runtime_error("BCryptOpenAlgorithmProvider failed");
+    if (auto st = BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM,
+                                              nullptr, 0); st != 0)
+        throw std::runtime_error("BCryptOpenAlgorithmProvider: " +
+                                 nt_error(st));
 
     DWORD obj_size = 0, result_size = 0;
     BCryptGetProperty(alg, BCRYPT_OBJECT_LENGTH,
@@ -103,11 +162,11 @@ Sha256::Sha256()
     c->alg = alg;
     c->obj.resize(obj_size);
 
-    if (BCryptCreateHash(alg, &c->hash, c->obj.data(),
-                         obj_size, nullptr, 0, 0) != 0) {
+    if (auto st = BCryptCreateHash(alg, &c->hash, c->obj.data(),
+                                   obj_size, nullptr, 0, 0); st != 0) {
         BCryptCloseAlgorithmProvider(alg, 0);
         delete c;
-        throw std::runtime_error("BCryptCreateHash failed");
+        throw std::runtime_error("BCryptCreateHash: " + nt_error(st));
     }
     ctx = c;
 }
@@ -173,14 +232,16 @@ static HttpResponse winhttp_request(const std::string &host,
                                    WINHTTP_NO_PROXY_NAME,
                                    WINHTTP_NO_PROXY_BYPASS, 0);
     if (!session)
-        throw std::runtime_error("WinHttpOpen failed");
+        throw std::runtime_error("WinHttpOpen: " + win_error(GetLastError()));
 
     auto whost = to_wide(host);
     HINTERNET conn = WinHttpConnect(session, whost.c_str(),
                                    INTERNET_DEFAULT_HTTPS_PORT, 0);
     if (!conn) {
+        DWORD err = GetLastError();
         WinHttpCloseHandle(session);
-        throw std::runtime_error("WinHttpConnect failed");
+        throw std::runtime_error("WinHttpConnect " + host + ": " +
+                                 win_error(err));
     }
 
     auto wpath = to_wide(path);
@@ -190,9 +251,10 @@ static HttpResponse winhttp_request(const std::string &host,
                                        WINHTTP_DEFAULT_ACCEPT_TYPES,
                                        WINHTTP_FLAG_SECURE);
     if (!req) {
+        DWORD err = GetLastError();
         WinHttpCloseHandle(conn);
         WinHttpCloseHandle(session);
-        throw std::runtime_error("WinHttpOpenRequest failed");
+        throw std::runtime_error("WinHttpOpenRequest: " + win_error(err));
     }
 
     std::wstring auth_header = L"Authorization: Bearer " + to_wide(bearer_token);
@@ -212,10 +274,12 @@ static HttpResponse winhttp_request(const std::string &host,
                                  body ? (DWORD)body->size() : 0,
                                  0);
     if (!ok || !WinHttpReceiveResponse(req, nullptr)) {
+        DWORD err = GetLastError();
         WinHttpCloseHandle(req);
         WinHttpCloseHandle(conn);
         WinHttpCloseHandle(session);
-        throw std::runtime_error("WinHttp request failed");
+        throw std::runtime_error("WinHttp request to " + host + ": " +
+                                 win_error(err));
     }
 
     DWORD status = 0, status_size = sizeof(status);
@@ -267,7 +331,8 @@ static void parse_https_url(const std::string &url,
     uc.dwExtraInfoLength = DWORD(-1);
     uc.dwSchemeLength    = DWORD(-1);
     if (!WinHttpCrackUrl(wurl.c_str(), DWORD(wurl.size()), 0, &uc))
-        throw std::runtime_error("WinHttpCrackUrl failed on URL: " + url);
+        throw std::runtime_error("WinHttpCrackUrl on " + url + ": " +
+                                 win_error(GetLastError()));
     if (uc.nScheme != INTERNET_SCHEME_HTTPS)
         throw std::runtime_error("expected https:// URL, got: " + url);
     host.assign(uc.lpszHostName, uc.dwHostNameLength);
@@ -290,13 +355,16 @@ static HttpResponse winhttp_url_request(const std::string &url,
                                    WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
                                    WINHTTP_NO_PROXY_NAME,
                                    WINHTTP_NO_PROXY_BYPASS, 0);
-    if (!session) throw std::runtime_error("WinHttpOpen failed");
+    if (!session)
+        throw std::runtime_error("WinHttpOpen: " + win_error(GetLastError()));
 
     HINTERNET conn = WinHttpConnect(session, whost.c_str(),
                                    INTERNET_DEFAULT_HTTPS_PORT, 0);
     if (!conn) {
+        DWORD err = GetLastError();
         WinHttpCloseHandle(session);
-        throw std::runtime_error("WinHttpConnect failed");
+        throw std::runtime_error("WinHttpConnect " + url + ": " +
+                                 win_error(err));
     }
 
     HINTERNET req = WinHttpOpenRequest(conn, method, wpath.c_str(),
@@ -304,9 +372,10 @@ static HttpResponse winhttp_url_request(const std::string &url,
                                        WINHTTP_DEFAULT_ACCEPT_TYPES,
                                        WINHTTP_FLAG_SECURE);
     if (!req) {
+        DWORD err = GetLastError();
         WinHttpCloseHandle(conn);
         WinHttpCloseHandle(session);
-        throw std::runtime_error("WinHttpOpenRequest failed");
+        throw std::runtime_error("WinHttpOpenRequest: " + win_error(err));
     }
 
     if (bearer_token) {
@@ -327,10 +396,12 @@ static HttpResponse winhttp_url_request(const std::string &url,
                                  body ? (DWORD)body->size() : 0,
                                  0);
     if (!ok || !WinHttpReceiveResponse(req, nullptr)) {
+        DWORD err = GetLastError();
         WinHttpCloseHandle(req);
         WinHttpCloseHandle(conn);
         WinHttpCloseHandle(session);
-        throw std::runtime_error("WinHttp request failed");
+        throw std::runtime_error("WinHttp request to " + url + ": " +
+                                 win_error(err));
     }
 
     DWORD status = 0, status_size = sizeof(status);
@@ -379,14 +450,17 @@ HttpResponse http_post_binary(const std::string &host, int port,
                                    WINHTTP_NO_PROXY_NAME,
                                    WINHTTP_NO_PROXY_BYPASS, 0);
     if (!session)
-        throw std::runtime_error("WinHttpOpen failed");
+        throw std::runtime_error("WinHttpOpen: " + win_error(GetLastError()));
 
     auto whost = to_wide(host);
     HINTERNET conn = WinHttpConnect(session, whost.c_str(),
                                    INTERNET_PORT(port), 0);
     if (!conn) {
+        DWORD err = GetLastError();
         WinHttpCloseHandle(session);
-        throw std::runtime_error("WinHttpConnect failed");
+        throw std::runtime_error("WinHttpConnect " + host + ":" +
+                                 std::to_string(port) + ": " +
+                                 win_error(err));
     }
 
     auto wpath = to_wide(path);
@@ -395,9 +469,10 @@ HttpResponse http_post_binary(const std::string &host, int port,
                                        WINHTTP_DEFAULT_ACCEPT_TYPES,
                                        0);  // no WINHTTP_FLAG_SECURE: plain HTTP
     if (!req) {
+        DWORD err = GetLastError();
         WinHttpCloseHandle(conn);
         WinHttpCloseHandle(session);
-        throw std::runtime_error("WinHttpOpenRequest failed");
+        throw std::runtime_error("WinHttpOpenRequest: " + win_error(err));
     }
 
     std::wstring ct = L"Content-Type: " + to_wide(content_type);
@@ -417,10 +492,13 @@ HttpResponse http_post_binary(const std::string &host, int port,
                                  (DWORD)body.size(),
                                  0);
     if (!ok || !WinHttpReceiveResponse(req, nullptr)) {
+        DWORD err = GetLastError();
         WinHttpCloseHandle(req);
         WinHttpCloseHandle(conn);
         WinHttpCloseHandle(session);
-        throw std::runtime_error("WinHttp TSA request failed");
+        throw std::runtime_error("WinHttp TSA request to " + host + ":" +
+                                 std::to_string(port) + ": " +
+                                 win_error(err));
     }
 
     DWORD status = 0, status_size = sizeof(status);
@@ -457,13 +535,6 @@ static std::wstring utf8_to_wide(const std::string &s)
     std::wstring w(size_t(n), L'\0');
     MultiByteToWideChar(CP_UTF8, 0, s.data(), int(s.size()), w.data(), n);
     return w;
-}
-
-static std::string win_error(DWORD code)
-{
-    std::ostringstream s;
-    s << "Win32 error " << code;
-    return s.str();
 }
 
 static HANDLE file_handle(void *impl) { return HANDLE(impl); }
@@ -784,8 +855,15 @@ void launch_browser(const std::string &url)
     // ShellExecuteW returns a value > 32 on success.
     HINSTANCE r = ShellExecuteW(nullptr, L"open", wurl.c_str(),
                                 nullptr, nullptr, SW_SHOWNORMAL);
-    if (reinterpret_cast<intptr_t>(r) <= 32)
-        throw std::runtime_error("ShellExecuteW failed for URL: " + url);
+    // ShellExecuteW's return value IS the error: values 0..32 encode
+    // distinct SE_ERR_* codes (many overlap with Win32 errno, which
+    // FormatMessage's FROM_SYSTEM maps correctly -- SE_ERR_FNF=2 ->
+    // "file not found", SE_ERR_ACCESSDENIED=5 -> "access denied",
+    // etc.).  GetLastError is not set reliably by ShellExecuteW.
+    auto code = intptr_t(r);
+    if (code <= 32)
+        throw std::runtime_error("ShellExecuteW on " + url + ": " +
+                                 win_error(DWORD(code)));
 }
 
 std::string config_dir()
@@ -826,9 +904,9 @@ int main()
     int wargc = 0;
     LPWSTR *wargv = CommandLineToArgvW(GetCommandLineW(), &wargc);
     if (!wargv) {
-        std::ostringstream msg;
-        msg << "CommandLineToArgvW failed (error " << GetLastError() << ")\n";
-        platform::write_stderr(msg.str());
+        platform::write_stderr(
+            "CommandLineToArgvW failed: " +
+            platform::win_error(GetLastError()) + "\n");
         return 1;
     }
 
