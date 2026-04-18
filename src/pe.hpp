@@ -1,6 +1,6 @@
 #pragma once
 
-#include "sha256.hpp"
+#include "platform.hpp"
 
 #include <array>
 #include <cstdint>

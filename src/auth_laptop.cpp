@@ -1,16 +1,14 @@
 #include "auth_laptop.hpp"
 #include "base64.hpp"
-#include "sha256.hpp"
+#include "platform.hpp"
 #include "urlenc.hpp"
 
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
-#include <iostream>
 #include <random>
 #include <sstream>
 #include <stdexcept>
@@ -197,7 +195,8 @@ int login_main(int argc, char **argv)
         else if (!strcmp(argv[i], "--profile") && i + 1 < argc)
             cfg_profile = argv[++i];
         else if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
-            std::cout
+            std::ostringstream os;
+            os
                 << "usage: aas-sign login [--tenant T] [--client-id C]\n"
                 << "                      [--endpoint H] [--account N]"
                                                  " [--profile P]\n"
@@ -216,11 +215,13 @@ int login_main(int argc, char **argv)
                 << "                 (merged) into config.json alongside the\n"
                 << "                 token cache, becoming the default for\n"
                 << "                 later `aas-sign sign` calls.\n";
+            platform::write_stdout(os.str());
             return 0;
         }
         else {
-            std::cerr << "aas-sign login: unknown option: "
-                      << argv[i] << '\n';
+            platform::write_stderr(
+                std::string("aas-sign login: unknown option: ") +
+                argv[i] + "\n");
             return 1;
         }
     }
@@ -257,13 +258,17 @@ int login_main(int argc, char **argv)
         "&code_challenge=" + challenge +
         "&code_challenge_method=S256";
 
-    std::cerr << "Opening browser to sign in...\n"
-              << "If it doesn't open automatically, visit:\n  "
-              << authorize << "\n";
+    {
+        std::ostringstream os;
+        os << "Opening browser to sign in...\n"
+           << "If it doesn't open automatically, visit:\n  "
+           << authorize << "\n";
+        platform::write_stderr(os.str());
+    }
     try {
         platform::launch_browser(authorize);
     } catch (const std::exception &e) {
-        std::cerr << "(warning: " << e.what() << ")\n";
+        platform::write_stderr(std::string("(warning: ") + e.what() + ")\n");
     }
 
     // Wait for the redirect.
@@ -276,7 +281,7 @@ int login_main(int argc, char **argv)
             msg += " -- " + d->second;
         server.respond("<!doctype html><meta charset=utf-8>"
                        "<p>aas-sign login failed. You can close this window.");
-        std::cerr << msg << '\n';
+        platform::write_stderr(msg + "\n");
         return 1;
     }
 
@@ -285,13 +290,13 @@ int login_main(int argc, char **argv)
     if (code_it == q.end() || state_it == q.end()) {
         server.respond("<!doctype html><meta charset=utf-8>"
                        "<p>Missing code or state. You can close this window.");
-        std::cerr << "authorization response missing code/state\n";
+        platform::write_stderr("authorization response missing code/state\n");
         return 1;
     }
     if (state_it->second != state) {
         server.respond("<!doctype html><meta charset=utf-8>"
                        "<p>State mismatch. You can close this window.");
-        std::cerr << "state mismatch: possible CSRF, aborting\n";
+        platform::write_stderr("state mismatch: possible CSRF, aborting\n");
         return 1;
     }
 
@@ -349,8 +354,12 @@ int login_main(int argc, char **argv)
     cache["refresh_token"]   = refresh_token;
     write_cache(cache);
 
-    std::cerr << "Logged in as " << username << ".\n"
-              << "Cache: " << cache_path() << '\n';
+    {
+        std::ostringstream os;
+        os << "Logged in as " << username << ".\n"
+           << "Cache: " << cache_path() << '\n';
+        platform::write_stderr(os.str());
+    }
 
     // If any signing-defaults flags were provided, merge them into
     // config.json (preserve fields the flags didn't touch).  Post-login
@@ -368,7 +377,7 @@ int login_main(int argc, char **argv)
         if (!cfg_account.empty())  cfg["account"]  = cfg_account;
         if (!cfg_profile.empty())  cfg["profile"]  = cfg_profile;
         atomic_write_json(cfg_path, cfg);
-        std::cerr << "Saved signing defaults to " << cfg_path << '\n';
+        platform::write_stderr("Saved signing defaults to " + cfg_path + "\n");
     }
 
     return 0;
@@ -437,7 +446,8 @@ int logout_main(int argc, char **argv)
 {
     for (int i = 2; i < argc; i++) {  // argv[1] == "logout"
         if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
-            std::cout
+            std::ostringstream os;
+            os
                 << "usage: aas-sign logout\n"
                 << "\n"
                 << "Delete the local refresh-token cache at\n"
@@ -447,9 +457,11 @@ int logout_main(int argc, char **argv)
                 << "remains valid on Microsoft's side until its natural\n"
                 << "expiry (~90 days of inactivity) or until an admin\n"
                 << "revokes it in the Entra portal.\n";
+            platform::write_stdout(os.str());
             return 0;
         }
-        std::cerr << "aas-sign logout: unknown option: " << argv[i] << '\n';
+        platform::write_stderr(std::string("aas-sign logout: unknown option: ") +
+                               argv[i] + "\n");
         return 1;
     }
 
@@ -458,9 +470,9 @@ int logout_main(int argc, char **argv)
     if (test) {
         test.close();
         delete_cache();
-        std::cerr << "Logged out (removed " << p << ").\n";
+        platform::write_stderr("Logged out (removed " + p + ").\n");
     } else {
-        std::cerr << "Not logged in (no cache at " << p << ").\n";
+        platform::write_stderr("Not logged in (no cache at " + p + ").\n");
     }
     return 0;
 }

@@ -4,7 +4,7 @@
 #include "cms.hpp"
 #include "oidc.hpp"
 #include "pe.hpp"
-#include "sha256.hpp"
+#include "platform.hpp"
 #include "tsa.hpp"
 
 #include <nlohmann/json.hpp>
@@ -15,7 +15,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
-#include <iostream>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -26,17 +25,20 @@
 static const char DEFAULT_TSA_URL[] =
     "http://timestamp.acs.microsoft.com/timestamping/RFC3161";
 
-static void usage_short(std::ostream &os, const char *argv0)
+static void usage_short(const char *argv0)
 {
+    std::ostringstream os;
     os << "usage: " << argv0 << " sign [options] FILE [FILE ...]\n"
        << "       " << argv0 << " login [--endpoint H --account N --profile P] [--tenant T]\n"
        << "       " << argv0 << " logout\n"
        << "Try `" << argv0 << " --help' for more information.\n";
+    platform::write_stderr(os.str());
 }
 
 static void usage_full(const char *argv0)
 {
-    std::cout
+    std::ostringstream os;
+    os
         << "usage: " << argv0 << " sign [options] FILE [FILE ...]\n"
         << "       " << argv0 << " login [--endpoint H --account N --profile P] [--tenant T]\n"
         << "       " << argv0 << " logout\n"
@@ -101,6 +103,7 @@ static void usage_full(const char *argv0)
         << "\n"
         << "  --version            Print version and exit.\n"
         << "  --help, -h           Print this help and exit.\n";
+    platform::write_stdout(os.str());
 }
 
 struct Config {
@@ -124,28 +127,60 @@ struct SignResult {
     std::string error;  // empty iff ok
 };
 
-// Logger that either writes straight to std::cerr (single-file mode) or
-// buffers lines with a "[file] " prefix and emits the whole block at once
-// (multi-file mode).  Flushing under a shared mutex keeps concurrent file
+// Logger that either emits each line immediately via
+// platform::write_stderr (single-file mode) or buffers lines with a
+// "[file] " prefix and emits the whole block at once (multi-file
+// mode).  Flushing under a shared mutex keeps concurrent file
 // narratives from interleaving.
+//
+// line() returns an RAII LineStream; callers build a line with
+// operator<< into it, and its destructor either flushes to
+// platform::write_stderr (single-file) or appends to the
+// per-FileLogger buffer (multi-file).  Ergonomics stay the same as
+// before -- `log.line() << "foo" << x << '\n';` works unchanged.
 class FileLogger {
 public:
     FileLogger(std::string file, bool multi)
         : multi_(multi), prefix_("[" + std::move(file) + "] ") {}
 
-    std::ostream &line()
+    class LineStream {
+    public:
+        LineStream(FileLogger *owner, bool multi)
+            : owner_(owner), multi_(multi) {}
+        LineStream(LineStream &&other) noexcept
+            : owner_(other.owner_), multi_(other.multi_),
+              os_(std::move(other.os_).str())
+        {
+            other.owner_ = nullptr;
+        }
+        ~LineStream()
+        {
+            if (!owner_) return;
+            if (multi_)
+                owner_->buf_ << os_.str();
+            else
+                platform::write_stderr(os_.str());
+        }
+        template <class T>
+        LineStream &operator<<(T &&v) { os_ << std::forward<T>(v); return *this; }
+    private:
+        FileLogger *owner_;
+        bool multi_;
+        std::ostringstream os_;
+    };
+
+    LineStream line()
     {
-        if (multi_)
-            return buf_ << prefix_;
-        return std::cerr;
+        LineStream ls(this, multi_);
+        if (multi_) ls << prefix_;
+        return ls;
     }
 
     void flush(std::mutex &mu)
     {
         if (!multi_) return;
         std::lock_guard<std::mutex> g(mu);
-        std::cerr << buf_.str();
-        std::cerr.flush();
+        platform::write_stderr(buf_.str());
         buf_.str({});
     }
 
@@ -169,7 +204,7 @@ static SignResult sign_one_file(const std::string &file, const Config &cfg,
         // Compute Authenticode hash.
         auto pe_hash = pe.authenticode_hash();
         {
-            auto &ls = log.line();
+            auto ls = log.line();
             ls << "Authenticode SHA-256: ";
             char buf[3];
             for (auto b : pe_hash) {
@@ -258,13 +293,15 @@ static int sign_main(int argc, char **argv)
             usage_full(argv[0]);
             return 0;
         } else if (!strcmp(argv[i], "--version")) {
-            std::cout << "aas-sign " << AAS_SIGN_VERSION << '\n';
+            platform::write_stdout(std::string("aas-sign ") +
+                                   AAS_SIGN_VERSION + "\n");
             return 0;
         } else if (argv[i][0] != '-')
             files.push_back(argv[i]);
         else {
-            std::cerr << "unknown option: " << argv[i] << '\n';
-            usage_short(std::cerr, argv[0]);
+            platform::write_stderr(std::string("unknown option: ") +
+                                   argv[i] + "\n");
+            usage_short(argv[0]);
             return 1;
         }
     }
@@ -284,8 +321,9 @@ static int sign_main(int argc, char **argv)
             if (cfg.profile.empty())  cfg.profile  = j.value("profile", "");
         }
     } catch (const std::exception &e) {
-        std::cerr << "warning: ignoring unreadable config.json: "
-                  << e.what() << '\n';
+        std::ostringstream os;
+        os << "warning: ignoring unreadable config.json: " << e.what() << '\n';
+        platform::write_stderr(os.str());
     }
 
     // Token resolution, in order of precedence:
@@ -308,13 +346,14 @@ static int sign_main(int argc, char **argv)
 
     if (cfg.token.empty() &&
         !cfg.oidc_client_id.empty() && !cfg.oidc_tenant_id.empty()) {
-        std::cerr << "Fetching Azure token via GitHub OIDC federation...\n";
+        platform::write_stderr(
+            "Fetching Azure token via GitHub OIDC federation...\n");
         try {
             cfg.token = oidc_fetch_azure_token(oidc_runtime(),
                                                cfg.oidc_client_id,
                                                cfg.oidc_tenant_id);
         } catch (const std::exception &e) {
-            std::cerr << "error: " << e.what() << '\n';
+            platform::write_stderr(std::string("error: ") + e.what() + "\n");
             return 1;
         }
     }
@@ -323,9 +362,9 @@ static int sign_main(int argc, char **argv)
         try {
             cfg.token = try_cached_refresh();
             if (!cfg.token.empty())
-                std::cerr << "Using cached login.\n";
+                platform::write_stderr("Using cached login.\n");
         } catch (const std::exception &e) {
-            std::cerr << "error: " << e.what() << '\n';
+            platform::write_stderr(std::string("error: ") + e.what() + "\n");
             return 1;
         }
     }
@@ -334,7 +373,9 @@ static int sign_main(int argc, char **argv)
         bool ok = true;
         auto require = [&](bool present, const char *what) {
             if (!present) {
-                std::cerr << argv[0] << ": missing " << what << '\n';
+                std::ostringstream os;
+                os << argv[0] << ": missing " << what << '\n';
+                platform::write_stderr(os.str());
                 ok = false;
             }
         };
@@ -346,19 +387,20 @@ static int sign_main(int argc, char **argv)
                 "use --oidc-* (in CI), or run `aas-sign login` first");
         require(!files.empty(),        "input file");
         if (!ok) {
-            usage_short(std::cerr, argv[0]);
+            usage_short(argv[0]);
             return 1;
         }
     }
 
     if (files.size() > 1 && !cfg.dump_cms.empty()) {
-        std::cerr
-            << "error: --dump-cms only supported when signing a single file\n";
+        platform::write_stderr(
+            "error: --dump-cms only supported when signing a single file\n");
         return 1;
     }
 
-    // Single-file fast path: straight to std::cerr, no threading, preserves
-    // today's exact output and stack-trace behavior.
+    // Single-file fast path: LineStream flushes each line immediately via
+    // platform::write_stderr, no threading, preserves today's exact output
+    // and stack-trace behavior.
     if (files.size() == 1) {
         FileLogger fl(files[0], /*multi=*/false);
         auto r = sign_one_file(files[0], cfg, fl);
@@ -383,7 +425,8 @@ static int sign_main(int argc, char **argv)
                     FileLogger fl(files[idx], /*multi=*/true);
                     {
                         std::lock_guard<std::mutex> g(log_mu);
-                        std::cerr << "[" << files[idx] << "] starting\n";
+                        platform::write_stderr(
+                            "[" + files[idx] + "] starting\n");
                     }
                     results[idx] = sign_one_file(files[idx], cfg, fl);
                     fl.flush(log_mu);
@@ -399,14 +442,19 @@ static int sign_main(int argc, char **argv)
         if (r.ok) ok_count++;
         else failures.push_back(&r);
     }
-    std::cerr << "Signed " << ok_count << "/" << n_files << " files";
-    if (failures.empty()) {
-        std::cerr << " successfully.\n";
-        return 0;
+    {
+        std::ostringstream os;
+        os << "Signed " << ok_count << "/" << n_files << " files";
+        if (failures.empty()) {
+            os << " successfully.\n";
+            platform::write_stderr(os.str());
+            return 0;
+        }
+        os << ". Failures:\n";
+        for (auto *f : failures)
+            os << "  " << f->file << ": " << f->error << '\n';
+        platform::write_stderr(os.str());
     }
-    std::cerr << ". Failures:\n";
-    for (auto *f : failures)
-        std::cerr << "  " << f->file << ": " << f->error << '\n';
     return 1;
 }
 
@@ -417,7 +465,7 @@ static int sign_main(int argc, char **argv)
 int aas_sign_main(int argc, char **argv)
 {
     if (argc < 2) {
-        usage_short(std::cerr, argv[0]);
+        usage_short(argv[0]);
         return 1;
     }
     if (!strcmp(argv[1], "--help") || !strcmp(argv[1], "-h")) {
@@ -425,7 +473,8 @@ int aas_sign_main(int argc, char **argv)
         return 0;
     }
     if (!strcmp(argv[1], "--version")) {
-        std::cout << "aas-sign " << AAS_SIGN_VERSION << '\n';
+        platform::write_stdout(std::string("aas-sign ") +
+                               AAS_SIGN_VERSION + "\n");
         return 0;
     }
     if (!strcmp(argv[1], "sign"))
@@ -435,7 +484,11 @@ int aas_sign_main(int argc, char **argv)
     if (!strcmp(argv[1], "logout"))
         return logout_main(argc, argv);
 
-    std::cerr << argv[0] << ": unknown subcommand: " << argv[1] << '\n';
-    usage_short(std::cerr, argv[0]);
+    {
+        std::ostringstream os;
+        os << argv[0] << ": unknown subcommand: " << argv[1] << '\n';
+        platform::write_stderr(os.str());
+    }
+    usage_short(argv[0]);
     return 1;
 }

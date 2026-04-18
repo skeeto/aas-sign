@@ -1,6 +1,6 @@
 #include "azure.hpp"
 #include "base64.hpp"
-#include "sha256.hpp"
+#include "platform.hpp"
 
 #include <nlohmann/json.hpp>
 #include <chrono>

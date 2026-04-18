@@ -1,6 +1,6 @@
 #include "app.hpp"
 #include "narrow.hpp"
-#include "sha256.hpp"
+#include "platform.hpp"
 
 #include <mbedtls/sha256.h>
 #include <mbedtls/net_sockets.h>
@@ -27,6 +27,29 @@
 #include <stdexcept>
 
 namespace platform {
+
+// --- Console output ---
+
+namespace {
+void write_fd_all(int fd, std::string_view bytes)
+{
+    const char *p = bytes.data();
+    size_t left = bytes.size();
+    while (left > 0) {
+        ssize_t n = ::write(fd, p, left);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            return;  // best-effort; match std::cerr's silent-fail
+        }
+        if (n == 0) return;
+        p += n;
+        left -= size_t(n);
+    }
+}
+}  // namespace
+
+void write_stdout(std::string_view bytes) { write_fd_all(STDOUT_FILENO, bytes); }
+void write_stderr(std::string_view bytes) { write_fd_all(STDERR_FILENO, bytes); }
 
 // --- SHA-256 ---
 

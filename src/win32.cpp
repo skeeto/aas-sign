@@ -1,5 +1,5 @@
 #include "app.hpp"
-#include "sha256.hpp"
+#include "platform.hpp"
 
 #ifdef _WIN32
 
@@ -20,6 +20,67 @@
 #include <vector>
 
 namespace platform {
+
+// --- Console output ---
+
+namespace {
+
+bool stream_is_console(HANDLE h)
+{
+    if (h == nullptr || h == INVALID_HANDLE_VALUE) return false;
+    DWORD mode = 0;
+    return GetConsoleMode(h, &mode) != 0;
+}
+
+void write_handle_all(DWORD which, std::string_view bytes)
+{
+    HANDLE h = GetStdHandle(which);
+    if (h == nullptr || h == INVALID_HANDLE_VALUE) return;
+
+    if (stream_is_console(h)) {
+        // Transcode UTF-8 -> UTF-16 and use WriteConsoleW so non-ASCII
+        // characters render correctly regardless of the console code page.
+        if (bytes.empty()) return;
+        int wn = MultiByteToWideChar(CP_UTF8, 0, bytes.data(),
+                                     int(bytes.size()), nullptr, 0);
+        if (wn <= 0) return;
+        std::wstring w(size_t(wn), L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, bytes.data(), int(bytes.size()),
+                            w.data(), wn);
+        const wchar_t *p = w.data();
+        DWORD left = DWORD(w.size());
+        while (left > 0) {
+            DWORD written = 0;
+            if (!WriteConsoleW(h, p, left, &written, nullptr)) return;
+            if (written == 0) return;
+            p += written;
+            left -= written;
+        }
+    } else {
+        // Redirected to a file or pipe: write UTF-8 bytes verbatim.
+        const char *p = bytes.data();
+        DWORD left = DWORD(bytes.size());
+        while (left > 0) {
+            DWORD written = 0;
+            if (!WriteFile(h, p, left, &written, nullptr)) return;
+            if (written == 0) return;
+            p += written;
+            left -= written;
+        }
+    }
+}
+
+}  // namespace
+
+void write_stdout(std::string_view bytes)
+{
+    write_handle_all(STD_OUTPUT_HANDLE, bytes);
+}
+
+void write_stderr(std::string_view bytes)
+{
+    write_handle_all(STD_ERROR_HANDLE, bytes);
+}
 
 Sha256::Sha256()
 {
@@ -765,8 +826,9 @@ int main()
     int wargc = 0;
     LPWSTR *wargv = CommandLineToArgvW(GetCommandLineW(), &wargc);
     if (!wargv) {
-        fprintf(stderr, "CommandLineToArgvW failed (error %lu)\n",
-                GetLastError());
+        std::ostringstream msg;
+        msg << "CommandLineToArgvW failed (error " << GetLastError() << ")\n";
+        platform::write_stderr(msg.str());
         return 1;
     }
 
@@ -779,7 +841,9 @@ int main()
                                     nullptr, 0, nullptr, nullptr);
         if (n <= 0) {
             LocalFree(wargv);
-            fprintf(stderr, "WideCharToMultiByte failed on arg %d\n", i);
+            std::ostringstream msg;
+            msg << "WideCharToMultiByte failed on arg " << i << "\n";
+            platform::write_stderr(msg.str());
             return 1;
         }
         args[i].resize(size_t(n) - 1);  // exclude trailing NUL

@@ -1,5 +1,5 @@
 #include "oidc.hpp"
-#include "sha256.hpp"
+#include "platform.hpp"
 #include "urlenc.hpp"
 
 #include <nlohmann/json.hpp>

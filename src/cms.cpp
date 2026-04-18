@@ -1,6 +1,6 @@
 #include "cms.hpp"
 #include "der.hpp"
-#include "sha256.hpp"
+#include "platform.hpp"
 #include "x509.hpp"
 #include <stdexcept>
 

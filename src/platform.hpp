@@ -3,9 +3,27 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace platform {
+
+// Write `bytes` to stdout/stderr as UTF-8.  If the handle is a
+// Windows console, transcodes to UTF-16 and uses WriteConsoleW so
+// non-ASCII characters render correctly regardless of the console's
+// active code page.  If the handle is redirected (file or pipe),
+// writes the UTF-8 bytes verbatim -- the right thing for
+// `aas-sign ... 2> log.txt` and `| tee`.  On POSIX: plain write(2)
+// in a loop.
+//
+// Best-effort: errors are swallowed (matches std::cerr, which also
+// silently drops).  Partial writes are retried until the buffer is
+// drained or write() returns a hard error.  Feature code builds a
+// string in memory (std::string or std::ostringstream) and hands
+// the finished UTF-8 bytes to these functions; no formatting is
+// performed here.
+void write_stdout(std::string_view bytes);
+void write_stderr(std::string_view bytes);
 
 struct Sha256 {
     Sha256();

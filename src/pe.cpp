@@ -1,6 +1,6 @@
 #include "pe.hpp"
 #include "narrow.hpp"
-#include "sha256.hpp"
+#include "platform.hpp"
 #include <algorithm>
 #include <cstring>
 #include <stdexcept>

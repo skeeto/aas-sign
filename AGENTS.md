@@ -47,7 +47,7 @@ oidc.cpp         CI-path OIDC exchange (GitHub Actions runner → Azure token)
 auth_laptop.cpp  Laptop-path OAuth login (browser + PKCE) + refresh cache
 base64.cpp       Base64 / base64url encode/decode
 urlenc.cpp       RFC 3986 percent-encoder
-sha256.hpp       Platform abstraction interface (everything below)
+platform.hpp     Platform abstraction interface (everything below)
 posix.cpp        POSIX impl: mbedTLS SHA-256, raw TLS HTTPS, TCP sockets,
                  open/pread/pwrite, /dev/urandom, xdg-open
 win32.cpp        Windows impl: BCrypt, WinHTTP, WinSock, CreateFileW,
@@ -60,14 +60,14 @@ Platform-specific sources are selected by CMake generator expressions.
 
 All OS-specific code — file I/O, sockets, crypto, HTTPS, browser
 launch, per-user config directory lookup, atomic file replace, etc. —
-lives behind `namespace platform` in `sha256.hpp` and is implemented
+lives behind `namespace platform` in `platform.hpp` and is implemented
 independently in `posix.cpp` and `win32.cpp`.  Feature modules
 (`auth_laptop.cpp`, `pe.cpp`, `cms.cpp`, …) are pure C++17/20 with no
 `#ifdef _WIN32` blocks, no `<windows.h>` includes, no POSIX-specific
 syscalls.
 
 When adding a new feature that needs OS-specific behaviour, don't
-reach for `#ifdef _WIN32` in the feature file.  Extend `sha256.hpp`
+reach for `#ifdef _WIN32` in the feature file.  Extend `platform.hpp`
 with a new function or class (follow the `File`, `LoopbackServer`,
 `atomic_write_private_file` shape), implement it twice (posix.cpp
 and win32.cpp), and call the abstraction from the feature code.
@@ -78,6 +78,17 @@ underlying errno / GetLastError in human-readable form.
 The payoff: feature modules read cleanly on both platforms, and the
 two platform files carry all the "this is how Windows does things"
 knowledge in one place where it can be reviewed as a unit.
+
+Console output follows the same rule: feature code never touches
+`std::cout` / `std::cerr` / `printf` directly.  Everything bound for
+stdout or stderr goes through `platform::write_stdout` /
+`platform::write_stderr`, which on Windows detect a console handle and
+use `WriteConsoleW` (UTF-8 → UTF-16 transcode) so non-ASCII paths and
+identifiers render correctly regardless of the active code page.
+Redirected streams get raw UTF-8 bytes — the right thing for
+`2> log.txt` and `| tee`.  Feature code composes lines in memory with
+`std::ostringstream` or `std::string`, then hands the finished bytes
+to the platform API.
 
 ## Signing flow
 
