@@ -74,3 +74,14 @@ else()
     mbedx509
     mbedcrypto)
 endif()
+
+# libFuzzer harnesses.  Built only when explicitly requested, and only
+# on Linux + Clang -- libFuzzer ships with Clang, and we rely on the
+# POSIX platform bits.  Detection of libstdc++ vs libc++ and the
+# per-harness add_executable wiring live in cmake/Fuzzing.cmake.
+option(AAS_SIGN_FUZZ "Build libFuzzer harnesses (Linux+Clang only)" OFF)
+
+if(AAS_SIGN_FUZZ)
+  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+  include(Fuzzing)
+endif()

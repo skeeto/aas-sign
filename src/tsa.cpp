@@ -62,7 +62,7 @@ static Bytes build_tsp_request(const std::array<uint8_t, 32> &hash,
 // Parse a DER-encoded TimeStampResp.  Returns the raw DER bytes of the
 // TimeStampToken ContentInfo on success; throws on any failure status or
 // parse error.
-static Bytes extract_token(const uint8_t *data, size_t len)
+Bytes tsa_parse_response(const uint8_t *data, size_t len)
 {
     //  TimeStampResp ::= SEQUENCE {
     //      status          PKIStatusInfo,
@@ -132,7 +132,7 @@ std::vector<uint8_t> tsa_timestamp(const std::string &url,
     if (resp.body.empty())
         throw std::runtime_error("TSA returned empty response");
 
-    return extract_token(
+    return tsa_parse_response(
         reinterpret_cast<const uint8_t *>(resp.body.data()),
         resp.body.size());
 }

@@ -14,3 +14,9 @@
 std::vector<uint8_t> tsa_timestamp(const std::string &url,
                                    const std::vector<uint8_t> &signature);
 
+// Parse a DER-encoded RFC 3161 TimeStampResp and return the raw DER
+// bytes of the enclosed TimeStampToken.  Throws std::runtime_error on
+// malformed input or a non-granted PKIStatus.  Exposed for fuzzing;
+// production callers go through tsa_timestamp().
+std::vector<uint8_t> tsa_parse_response(const uint8_t *data, size_t len);
+

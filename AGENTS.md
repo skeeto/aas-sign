@@ -18,6 +18,23 @@ C++20 (needed for `std::jthread`). Dependencies fetched via CMake
 FetchContent (nlohmann/json, mbedTLS on POSIX). Windows uses only system
 APIs (BCrypt, WinHTTP). pthreads on POSIX, winpthreads on MinGW.
 
+## Fuzzing
+
+Hand-rolled byte parsers (`pe.cpp`, `x509.cpp`, `tsa.cpp`) have
+libFuzzer harnesses under `fuzz/`.  Not built by default.  Linux +
+Clang only, with ASan + UBSan + `-D_GLIBCXX_DEBUG`:
+
+    cmake -B build-fuzz -DAAS_SIGN_FUZZ=ON \
+        -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+    cmake --build build-fuzz
+    ./build-fuzz/fuzz_x509_cert_id -max_total_time=60
+
+Targets: `fuzz_pe`, `fuzz_x509_cert_id`, `fuzz_x509_split_certs`,
+`fuzz_der_tlv`, `fuzz_tsa_parse`.  Each harness catches
+`std::exception` so the rejection path is not a finding; libFuzzer
+only flags sanitizer fires and real crashes.  We assume mbedTLS and
+nlohmann/json are fuzzed upstream.
+
 ## Distribution
 
 `action.yml` at the repo root is a composite GitHub Action published
