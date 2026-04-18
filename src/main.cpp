@@ -29,7 +29,7 @@ static const char DEFAULT_TSA_URL[] =
 static void usage_short(std::ostream &os, const char *argv0)
 {
     os << "usage: " << argv0 << " sign [options] FILE [FILE ...]\n"
-       << "       " << argv0 << " login [--tenant T] [--client-id C]\n"
+       << "       " << argv0 << " login [--endpoint H --account N --profile P] [--tenant T]\n"
        << "       " << argv0 << " logout\n"
        << "Try `" << argv0 << " --help' for more information.\n";
 }
@@ -38,7 +38,7 @@ static void usage_full(const char *argv0)
 {
     std::cout
         << "usage: " << argv0 << " sign [options] FILE [FILE ...]\n"
-        << "       " << argv0 << " login [--tenant T] [--client-id C]\n"
+        << "       " << argv0 << " login [--endpoint H --account N --profile P] [--tenant T]\n"
         << "       " << argv0 << " logout\n"
         << "       " << argv0 << " --version | --help\n"
         << "\n"
@@ -51,6 +51,8 @@ static void usage_full(const char *argv0)
         << "                       token under ${XDG_CONFIG_HOME:-~/.config}/\n"
         << "                       aas-sign (or %APPDATA%\\aas-sign on Windows).\n"
         << "                       Subsequent `sign` runs then use the cache.\n"
+        << "                       Can also save --endpoint/--account/--profile\n"
+        << "                       into config.json alongside the cache.\n"
         << "  logout               Delete the cached refresh token.\n"
         << "\n"
         << "sign options:\n"
@@ -90,8 +92,12 @@ static void usage_full(const char *argv0)
         << "      \"profile\": \"myprofile\" }\n"
         << "\n"
         << "login options:\n"
-        << "  --tenant TENANT      Azure tenant (default: organizations).\n"
+        << "  --tenant TENANT      Azure tenant (default: the repo owner's).\n"
         << "  --client-id ID       Override the default aas-sign app ID.\n"
+        << "  --endpoint HOST      Saves this endpoint into config.json for\n"
+        << "                       subsequent `sign` runs to use as default.\n"
+        << "  --account NAME       Saves this account into config.json.\n"
+        << "  --profile NAME       Saves this profile into config.json.\n"
         << "\n"
         << "  --version            Print version and exit.\n"
         << "  --help, -h           Print this help and exit.\n";

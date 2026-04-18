@@ -150,16 +150,15 @@ json read_cache()
     }
 }
 
-void write_cache(const json &j)
+// Write `body` to `final` via a tempfile + atomic rename.  On POSIX
+// the tempfile is created mode 0600 (these files contain secrets and
+// per-user defaults).  On Windows, default ACL per-user is sufficient.
+static void atomic_write_string(const std::string &final,
+                                const std::string &body)
 {
-    std::string dir = platform::config_dir();
-    std::string tmp = dir + "/token-cache.json.tmp";
-    std::string final = dir + "/token-cache.json";
-
-    std::string body = j.dump(2);
+    std::string tmp = final + ".tmp";
 
 #ifdef _WIN32
-    // CreateFileW with CREATE_ALWAYS; replace is atomic via MoveFileEx.
     int n = MultiByteToWideChar(CP_UTF8, 0, tmp.c_str(), -1,
                                 nullptr, 0);
     std::wstring wtmp(size_t(n - 1), L'\0');
@@ -167,7 +166,7 @@ void write_cache(const json &j)
     HANDLE h = CreateFileW(wtmp.c_str(), GENERIC_WRITE, 0, nullptr,
                            CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h == INVALID_HANDLE_VALUE)
-        throw std::runtime_error("open token cache tmp: Win32 error " +
+        throw std::runtime_error("open " + tmp + ": Win32 error " +
                                  std::to_string(GetLastError()));
     DWORD wrote = 0;
     WriteFile(h, body.data(), DWORD(body.size()), &wrote, nullptr);
@@ -179,12 +178,12 @@ void write_cache(const json &j)
     MultiByteToWideChar(CP_UTF8, 0, final.c_str(), -1, wfinal.data(), n2);
     if (!MoveFileExW(wtmp.c_str(), wfinal.c_str(),
                      MOVEFILE_REPLACE_EXISTING))
-        throw std::runtime_error("MoveFileExW token-cache: Win32 error " +
+        throw std::runtime_error("MoveFileExW " + final + ": Win32 error " +
                                  std::to_string(GetLastError()));
 #else
     int fd = ::open(tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
     if (fd < 0)
-        throw std::runtime_error(std::string("open token cache tmp: ") +
+        throw std::runtime_error(std::string("open ") + tmp + ": " +
                                  std::strerror(errno));
     size_t off = 0;
     while (off < body.size()) {
@@ -203,6 +202,11 @@ void write_cache(const json &j)
         throw std::runtime_error(std::string("rename: ") +
                                  std::strerror(errno));
 #endif
+}
+
+void write_cache(const json &j)
+{
+    atomic_write_string(cache_path(), j.dump(2));
 }
 
 void delete_cache()
@@ -237,24 +241,42 @@ int login_main(int argc, char **argv)
 {
     std::string tenant = AAS_SIGN_DEFAULT_TENANT;
     std::string client_id = AAS_SIGN_DEFAULT_CLIENT_ID;
+    // Optional signing defaults -- if any are provided, they're written
+    // to config.json after a successful login so that later `sign` runs
+    // don't need them on the command line.
+    std::string cfg_endpoint, cfg_account, cfg_profile;
 
     for (int i = 2; i < argc; i++) {  // argv[1] == "login"
         if (!strcmp(argv[i], "--tenant") && i + 1 < argc)
             tenant = argv[++i];
         else if (!strcmp(argv[i], "--client-id") && i + 1 < argc)
             client_id = argv[++i];
+        else if (!strcmp(argv[i], "--endpoint") && i + 1 < argc)
+            cfg_endpoint = argv[++i];
+        else if (!strcmp(argv[i], "--account") && i + 1 < argc)
+            cfg_account = argv[++i];
+        else if (!strcmp(argv[i], "--profile") && i + 1 < argc)
+            cfg_profile = argv[++i];
         else if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
             std::cout
                 << "usage: aas-sign login [--tenant T] [--client-id C]\n"
+                << "                      [--endpoint H] [--account N]"
+                                                 " [--profile P]\n"
                 << "\n"
                 << "Open the system browser, sign in to Microsoft Entra, and\n"
-                << "cache a refresh token at "
-                << platform::config_dir() << "/token-cache.json.\n"
+                << "cache a refresh token at\n"
+                << "    " << platform::config_dir() << "/token-cache.json\n"
                 << "Subsequent `aas-sign sign` runs use the cached token\n"
                 << "automatically until it's revoked or expires.\n"
                 << "\n"
-                << "  --tenant T     Azure tenant (default: organizations).\n"
-                << "  --client-id C  Override the baked-in aas-sign app ID.\n";
+                << "  --tenant T     Azure tenant (default: the repo owner's).\n"
+                << "  --client-id C  Override the baked-in aas-sign app ID.\n"
+                << "\n"
+                << "  --endpoint H, --account N, --profile P\n"
+                << "                 If any of these is passed, it is saved\n"
+                << "                 (merged) into config.json alongside the\n"
+                << "                 token cache, becoming the default for\n"
+                << "                 later `aas-sign sign` calls.\n";
             return 0;
         }
         else {
@@ -390,6 +412,26 @@ int login_main(int argc, char **argv)
 
     std::cerr << "Logged in as " << username << ".\n"
               << "Cache: " << cache_path() << '\n';
+
+    // If any signing-defaults flags were provided, merge them into
+    // config.json (preserve fields the flags didn't touch).  Post-login
+    // so a failed auth doesn't pollute the config.
+    if (!cfg_endpoint.empty() || !cfg_account.empty() ||
+        !cfg_profile.empty()) {
+        std::string cfg_path = platform::config_dir() + "/config.json";
+        json cfg;
+        std::ifstream existing(cfg_path);
+        if (existing) {
+            try { existing >> cfg; } catch (...) { cfg = json::object(); }
+        }
+        if (!cfg.is_object()) cfg = json::object();
+        if (!cfg_endpoint.empty()) cfg["endpoint"] = cfg_endpoint;
+        if (!cfg_account.empty())  cfg["account"]  = cfg_account;
+        if (!cfg_profile.empty())  cfg["profile"]  = cfg_profile;
+        atomic_write_string(cfg_path, cfg.dump(2));
+        std::cerr << "Saved signing defaults to " << cfg_path << '\n';
+    }
+
     return 0;
 }
 

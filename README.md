@@ -19,22 +19,28 @@ is fetched via FetchContent for TLS and SHA-256.
 
 ### Quick start
 
-    $ aas-sign login                                     # once; opens browser
-    $ aas-sign sign --endpoint <region>.codesigning.azure.net \
-                    --account <account>                      \
-                    --profile <profile>                      \
-                    myapp.exe
+    $ aas-sign login --endpoint <region>.codesigning.azure.net \
+                     --account <account>                       \
+                     --profile <profile>
+    $ aas-sign sign myapp.exe
 
-`aas-sign login` authenticates via the system browser (Microsoft Entra
-Authorization Code + PKCE) and caches a refresh token at
+The first command opens your browser (Microsoft Entra Authorization
+Code + PKCE), caches a refresh token at
 `~/.config/aas-sign/token-cache.json` (POSIX) or
-`%APPDATA%\aas-sign\token-cache.json` (Windows).  Subsequent
-`aas-sign sign` invocations silently mint fresh access tokens from the
-cache — no Azure CLI required.
+`%APPDATA%\aas-sign\token-cache.json` (Windows), and saves the three
+signing defaults to `config.json` in the same directory.  Subsequent
+`aas-sign sign` invocations silently mint fresh access tokens from
+the cache and read the signing target from `config.json` — no
+Azure CLI, no retyping flags.
 
 The cache is revoked if you log out in Entra, the refresh token
-expires (~90 days of inactivity), or you delete the file.  Rerun
-`aas-sign login` to refresh.
+expires (~90 days of inactivity), or you delete the file (or run
+`aas-sign logout`).  Rerun `aas-sign login` to refresh.
+
+You can also pass `--endpoint`/`--account`/`--profile` directly to
+`aas-sign sign` each time (they override `config.json`), or create
+`config.json` by hand — `login`'s role in writing it is just a
+first-run convenience.
 
 ### Full synopsis
 
