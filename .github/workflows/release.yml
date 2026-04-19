@@ -22,6 +22,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
+        with:
+          # SourceRelease.cmake uses `git describe --tags`; make sure
+          # the tag object itself is present, not just the commit.
+          fetch-tags: true
       - name: Build
         run: |
           set -euxo pipefail
@@ -35,6 +39,16 @@ jobs:
         with:
           name: linux
           path: aas-sign-linux-x86_64
+
+      - name: Package source release
+        run: |
+          set -euxo pipefail
+          cmake -P cmake/SourceRelease.cmake
+          ls -la aas-sign-*.tar.gz
+      - uses: actions/upload-artifact@v5
+        with:
+          name: source
+          path: aas-sign-*.tar.gz
 
   build-windows:
     runs-on: ubuntu-24.04
@@ -75,6 +89,10 @@ jobs:
         with:
           name: windows
           path: .
+      - uses: actions/download-artifact@v5
+        with:
+          name: source
+          path: .
       - name: Make linux binary executable
         run: chmod +x aas-sign-linux-x86_64
 
@@ -96,7 +114,10 @@ jobs:
       - name: Compute checksums
         run: |
           set -euo pipefail
-          sha256sum aas-sign-linux-x86_64 aas-sign-windows-x86_64.exe \
+          sha256sum \
+              aas-sign-linux-x86_64 \
+              aas-sign-windows-x86_64.exe \
+              aas-sign-*.tar.gz \
             > sha256sums.txt
           cat sha256sums.txt
 
@@ -118,4 +139,5 @@ jobs:
             "${flags[@]}" \
             aas-sign-linux-x86_64 \
             aas-sign-windows-x86_64.exe \
+            aas-sign-*.tar.gz \
             sha256sums.txt
