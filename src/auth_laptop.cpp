@@ -1,6 +1,7 @@
 #include "auth_laptop.hpp"
 #include "base64.hpp"
 #include "platform.hpp"
+#include "signer.hpp"
 #include "urlenc.hpp"
 
 #include <nlohmann/json.hpp>
@@ -206,24 +207,28 @@ int login_main(int argc, char **argv)
     // to config.json after a successful login so that later `sign` runs
     // don't need them on the command line.
     std::string cfg_endpoint, cfg_account, cfg_profile;
+    std::string tuple;       // positional REGION:ACCOUNT:PROFILE (optional)
+    bool individual_flags_used = false;
 
     for (int i = 2; i < argc; i++) {  // argv[1] == "login"
         if (!strcmp(argv[i], "--tenant") && i + 1 < argc)
             tenant = argv[++i];
         else if (!strcmp(argv[i], "--client-id") && i + 1 < argc)
             client_id = argv[++i];
-        else if (!strcmp(argv[i], "--endpoint") && i + 1 < argc)
-            cfg_endpoint = argv[++i];
-        else if (!strcmp(argv[i], "--account") && i + 1 < argc)
-            cfg_account = argv[++i];
-        else if (!strcmp(argv[i], "--profile") && i + 1 < argc)
-            cfg_profile = argv[++i];
+        else if (!strcmp(argv[i], "--endpoint") && i + 1 < argc) {
+            cfg_endpoint = argv[++i]; individual_flags_used = true;
+        }
+        else if (!strcmp(argv[i], "--account") && i + 1 < argc) {
+            cfg_account = argv[++i]; individual_flags_used = true;
+        }
+        else if (!strcmp(argv[i], "--profile") && i + 1 < argc) {
+            cfg_profile = argv[++i]; individual_flags_used = true;
+        }
         else if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
             std::ostringstream os;
             os
-                << "usage: aas-sign login [--tenant T] [--client-id C]\n"
-                << "                      [--endpoint H] [--account N]"
-                                                 " [--profile P]\n"
+                << "usage: aas-sign login [REGION:ACCOUNT:PROFILE]\n"
+                << "                      [--tenant T] [--client-id C]\n"
                 << "\n"
                 << "Open the system browser, sign in to Microsoft Entra, and\n"
                 << "cache a refresh token at\n"
@@ -231,21 +236,51 @@ int login_main(int argc, char **argv)
                 << "Subsequent `aas-sign sign` runs use the cached token\n"
                 << "automatically until it's revoked or expires.\n"
                 << "\n"
+                << "  REGION:ACCOUNT:PROFILE\n"
+                << "                 Optional positional signer tuple,\n"
+                << "                 e.g. `eus:mycompany:me`.  REGION\n"
+                << "                 auto-expands to\n"
+                << "                 REGION.codesigning.azure.net (pass a\n"
+                << "                 value containing `.' to override).\n"
+                << "                 When provided, the three values are\n"
+                << "                 saved to config.json after a successful\n"
+                << "                 login, so later `aas-sign sign` calls\n"
+                << "                 need no further arguments.\n"
+                << "\n"
                 << "  --tenant T     Azure tenant (default: the repo owner's).\n"
                 << "  --client-id C  Override the baked-in aas-sign app ID.\n"
                 << "\n"
                 << "  --endpoint H, --account N, --profile P\n"
-                << "                 If any of these is passed, it is saved\n"
-                << "                 (merged) into config.json alongside the\n"
-                << "                 token cache, becoming the default for\n"
-                << "                 later `aas-sign sign` calls.\n";
+                << "                 Equivalent long form of the positional\n"
+                << "                 tuple above; mutually exclusive with it.\n";
             platform::write_stdout(os.str());
             return 0;
         }
+        else if (argv[i][0] != '-' && tuple.empty())
+            tuple = argv[i];
         else {
             platform::write_stderr(
                 std::string("aas-sign login: unknown option: ") +
                 argv[i] + "\n");
+            return 1;
+        }
+    }
+
+    if (!tuple.empty()) {
+        if (individual_flags_used) {
+            platform::write_stderr(
+                "aas-sign login: positional REGION:ACCOUNT:PROFILE is "
+                "mutually exclusive with --endpoint/--account/--profile\n");
+            return 1;
+        }
+        try {
+            auto t = parse_signer_tuple(tuple);
+            cfg_endpoint = std::move(t.endpoint);
+            cfg_account  = std::move(t.account);
+            cfg_profile  = std::move(t.profile);
+        } catch (const std::exception &e) {
+            platform::write_stderr(std::string("aas-sign login: ") +
+                                   e.what() + "\n");
             return 1;
         }
     }
@@ -397,33 +432,45 @@ int login_main(int argc, char **argv)
 int config_main(int argc, char **argv)
 {
     std::string endpoint, account, profile;
+    std::string tuple;  // positional REGION:ACCOUNT:PROFILE (optional)
+    bool individual_flags_used = false;
 
     for (int i = 2; i < argc; i++) {  // argv[1] == "config"
-        if (!strcmp(argv[i], "--endpoint") && i + 1 < argc)
-            endpoint = argv[++i];
-        else if (!strcmp(argv[i], "--account") && i + 1 < argc)
-            account = argv[++i];
-        else if (!strcmp(argv[i], "--profile") && i + 1 < argc)
-            profile = argv[++i];
+        if (!strcmp(argv[i], "--endpoint") && i + 1 < argc) {
+            endpoint = argv[++i]; individual_flags_used = true;
+        }
+        else if (!strcmp(argv[i], "--account") && i + 1 < argc) {
+            account = argv[++i]; individual_flags_used = true;
+        }
+        else if (!strcmp(argv[i], "--profile") && i + 1 < argc) {
+            profile = argv[++i]; individual_flags_used = true;
+        }
         else if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
             std::ostringstream os;
             os
-                << "usage: aas-sign config [--endpoint H] [--account N]"
-                                                 " [--profile P]\n"
+                << "usage: aas-sign config REGION:ACCOUNT:PROFILE\n"
+                << "       aas-sign config [--endpoint H] [--account N]"
+                                                " [--profile P]\n"
                 << "\n"
                 << "Write signing defaults to\n"
                 << "    " << platform::config_dir() << "/config.json\n"
-                << "without performing a login.  Any fields not passed are\n"
-                << "preserved as they are in the existing file.  Equivalent\n"
-                << "to passing the same flags to `aas-sign login`, minus the\n"
-                << "auth step.\n"
+                << "without performing a login.  The positional tuple form\n"
+                << "sets all three values at once, e.g.\n"
+                << "    aas-sign config eus:mycompany:me\n"
+                << "REGION auto-expands to REGION.codesigning.azure.net\n"
+                << "(pass a value containing `.' to override).  Azure\n"
+                << "resource names never contain `:`, so the split is\n"
+                << "unambiguous.\n"
                 << "\n"
-                << "  --endpoint H   Azure Trusted Signing endpoint hostname.\n"
-                << "  --account N    Trusted Signing account name.\n"
-                << "  --profile P    Certificate profile name.\n";
+                << "The individual-flag form updates only the fields you\n"
+                << "pass; untouched fields in config.json are preserved.\n"
+                << "The two forms are mutually exclusive in a single\n"
+                << "invocation.\n";
             platform::write_stdout(os.str());
             return 0;
         }
+        else if (argv[i][0] != '-' && tuple.empty())
+            tuple = argv[i];
         else {
             platform::write_stderr(
                 std::string("aas-sign config: unknown option: ") +
@@ -432,10 +479,29 @@ int config_main(int argc, char **argv)
         }
     }
 
+    if (!tuple.empty()) {
+        if (individual_flags_used) {
+            platform::write_stderr(
+                "aas-sign config: positional REGION:ACCOUNT:PROFILE is "
+                "mutually exclusive with --endpoint/--account/--profile\n");
+            return 1;
+        }
+        try {
+            auto t = parse_signer_tuple(tuple);
+            endpoint = std::move(t.endpoint);
+            account  = std::move(t.account);
+            profile  = std::move(t.profile);
+        } catch (const std::exception &e) {
+            platform::write_stderr(std::string("aas-sign config: ") +
+                                   e.what() + "\n");
+            return 1;
+        }
+    }
+
     if (endpoint.empty() && account.empty() && profile.empty()) {
         platform::write_stderr(
-            "aas-sign config: nothing to do; pass at least one of"
-            " --endpoint, --account, --profile\n");
+            "aas-sign config: nothing to do; pass REGION:ACCOUNT:PROFILE"
+            " or at least one of --endpoint, --account, --profile\n");
         return 1;
     }
 

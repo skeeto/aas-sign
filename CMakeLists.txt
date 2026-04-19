@@ -52,6 +52,7 @@ add_executable(aas-sign
   src/tsa.cpp
   src/oidc.cpp
   src/urlenc.cpp
+  src/signer.cpp
   src/auth_laptop.cpp
   $<$<PLATFORM_ID:Windows>:src/win32.cpp>
   $<$<PLATFORM_ID:Windows>:${CMAKE_CURRENT_BINARY_DIR}/aas-sign.rc>

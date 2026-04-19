@@ -5,6 +5,7 @@
 #include "oidc.hpp"
 #include "pe.hpp"
 #include "platform.hpp"
+#include "signer.hpp"
 #include "tsa.hpp"
 
 #include <nlohmann/json.hpp>
@@ -28,10 +29,10 @@ static const char DEFAULT_TSA_URL[] =
 static void usage_short(const char *argv0)
 {
     std::ostringstream os;
-    os << "usage: " << argv0 << " sign [options] FILE [FILE ...]\n"
-       << "       " << argv0 << " login [--endpoint H --account N --profile P] [--tenant T]\n"
+    os << "usage: " << argv0 << " sign [--as REGION:ACCOUNT:PROFILE] [options] FILE [FILE ...]\n"
+       << "       " << argv0 << " login [REGION:ACCOUNT:PROFILE] [--tenant T] [--client-id C]\n"
        << "       " << argv0 << " logout\n"
-       << "       " << argv0 << " config [--endpoint H --account N --profile P]\n"
+       << "       " << argv0 << " config REGION:ACCOUNT:PROFILE\n"
        << "Try `" << argv0 << " --help' for more information.\n";
     platform::write_stderr(os.str());
 }
@@ -40,10 +41,10 @@ static void usage_full(const char *argv0)
 {
     std::ostringstream os;
     os
-        << "usage: " << argv0 << " sign [options] FILE [FILE ...]\n"
-        << "       " << argv0 << " login [--endpoint H --account N --profile P] [--tenant T]\n"
+        << "usage: " << argv0 << " sign [--as REGION:ACCOUNT:PROFILE] [options] FILE [FILE ...]\n"
+        << "       " << argv0 << " login [REGION:ACCOUNT:PROFILE] [--tenant T] [--client-id C]\n"
         << "       " << argv0 << " logout\n"
-        << "       " << argv0 << " config [--endpoint H --account N --profile P]\n"
+        << "       " << argv0 << " config REGION:ACCOUNT:PROFILE\n"
         << "       " << argv0 << " --version | --help\n"
         << "\n"
         << "Sign PE images (EXE, DLL) via Azure Artifact Signing "
@@ -64,10 +65,19 @@ static void usage_full(const char *argv0)
         << "                       flags to `login`, minus the auth step.\n"
         << "\n"
         << "sign options:\n"
+        << "  --as REGION:ACCOUNT:PROFILE\n"
+        << "                       Compact signer tuple, e.g.\n"
+        << "                         --as eus:mycompany:me\n"
+        << "                       REGION auto-expands to\n"
+        << "                       REGION.codesigning.azure.net (pass a\n"
+        << "                       value containing `.' to override).\n"
+        << "                       Mutually exclusive with the three long\n"
+        << "                       flags below.\n"
         << "  --endpoint HOST      Azure Trusted Signing endpoint hostname,\n"
-        << "                       e.g. eus.codesigning.azure.net.  Required.\n"
-        << "  --account NAME       Trusted Signing account name.  Required.\n"
-        << "  --profile NAME       Certificate profile name.  Required.\n"
+        << "                       e.g. eus.codesigning.azure.net.  Required\n"
+        << "                       unless --as or config.json supplies it.\n"
+        << "  --account NAME       Trusted Signing account name.\n"
+        << "  --profile NAME       Certificate profile name.\n"
         << "  --token TOKEN        Azure bearer token.  Falls back to the\n"
         << "                       AZURE_ACCESS_TOKEN environment variable.\n"
         << "  --oidc-client-id ID  Azure app client ID.  Combined with\n"
@@ -100,12 +110,20 @@ static void usage_full(const char *argv0)
         << "      \"profile\": \"myprofile\" }\n"
         << "\n"
         << "login options:\n"
+        << "  REGION:ACCOUNT:PROFILE\n"
+        << "                       Optional positional signer tuple,\n"
+        << "                       saved to config.json on successful login.\n"
+        << "                       E.g. `aas-sign login eus:mycompany:me`.\n"
         << "  --tenant TENANT      Azure tenant (default: the repo owner's).\n"
         << "  --client-id ID       Override the default aas-sign app ID.\n"
-        << "  --endpoint HOST      Saves this endpoint into config.json for\n"
-        << "                       subsequent `sign` runs to use as default.\n"
-        << "  --account NAME       Saves this account into config.json.\n"
-        << "  --profile NAME       Saves this profile into config.json.\n"
+        << "  --endpoint HOST      Equivalent long form of the three tuple\n"
+        << "  --account NAME       fields; mutually exclusive with the\n"
+        << "  --profile NAME       positional tuple above.\n"
+        << "\n"
+        << "config options:\n"
+        << "  REGION:ACCOUNT:PROFILE   Set all three signing defaults at once.\n"
+        << "  --endpoint HOST, --account NAME, --profile NAME\n"
+        << "                           Set individual fields (merge semantics).\n"
         << "\n"
         << "  --version            Print version and exit.\n"
         << "  --help, -h           Print this help and exit.\n";
@@ -272,10 +290,13 @@ static int sign_main(int argc, char **argv)
     cfg.timestamp_url = DEFAULT_TSA_URL;
     std::vector<std::string> files;
     int max_parallel = 8;
+    std::string as_arg;
 
     // argv[1] is "sign" (guaranteed by aas_sign_main dispatch).
     for (int i = 2; i < argc; i++) {
-        if (!strcmp(argv[i], "--endpoint") && i + 1 < argc)
+        if (!strcmp(argv[i], "--as") && i + 1 < argc)
+            as_arg = argv[++i];
+        else if (!strcmp(argv[i], "--endpoint") && i + 1 < argc)
             cfg.endpoint = argv[++i];
         else if (!strcmp(argv[i], "--account") && i + 1 < argc)
             cfg.account = argv[++i];
@@ -308,6 +329,29 @@ static int sign_main(int argc, char **argv)
             platform::write_stderr(std::string("unknown option: ") +
                                    argv[i] + "\n");
             usage_short(argv[0]);
+            return 1;
+        }
+    }
+
+    // Resolve --as TUPLE into endpoint/account/profile.  Mutually
+    // exclusive with the individual flags -- mixing them would either
+    // silently merge in surprising ways or require a precedence rule
+    // that nobody remembers; better to error out.
+    if (!as_arg.empty()) {
+        if (!cfg.endpoint.empty() || !cfg.account.empty() ||
+            !cfg.profile.empty()) {
+            platform::write_stderr(
+                "--as is mutually exclusive with "
+                "--endpoint/--account/--profile\n");
+            return 1;
+        }
+        try {
+            auto t = parse_signer_tuple(as_arg);
+            cfg.endpoint = std::move(t.endpoint);
+            cfg.account  = std::move(t.account);
+            cfg.profile  = std::move(t.profile);
+        } catch (const std::exception &e) {
+            platform::write_stderr(std::string("error: ") + e.what() + "\n");
             return 1;
         }
     }

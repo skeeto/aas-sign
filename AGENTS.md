@@ -85,6 +85,7 @@ auth_laptop.cpp  Laptop-path OAuth login (browser + PKCE) + refresh cache;
                  (write signing defaults to config.json without auth)
 base64.cpp       Base64 / base64url encode/decode
 urlenc.cpp       RFC 3986 percent-encoder
+signer.cpp       Parse the `region:account:profile` signer tuple
 platform.hpp     Platform abstraction interface (everything below)
 posix.cpp        POSIX impl: mbedTLS SHA-256, raw TLS HTTPS, TCP sockets,
                  open/pread/pwrite, /dev/urandom, xdg-open
@@ -141,6 +142,17 @@ to the platform API.
 
 ## Key details and gotchas
 
+- **Signer tuple syntax** (`signer.cpp`): three non-empty fields
+  separated by `:`, in outer-to-inner order — `REGION:ACCOUNT:PROFILE`.
+  Azure resource names never contain `:`, so the split is unambiguous.
+  The region field auto-expands: if it contains no `.` we append
+  `.codesigning.azure.net`; otherwise it's taken verbatim as a full
+  hostname (escape hatch for non-standard endpoints).  Accepted as a
+  positional arg by `login` and `config`, and via `--as` on `sign`.
+  The three individual flags (`--endpoint`/`--account`/`--profile`)
+  are the equivalent long form and are what the GitHub Action emits;
+  mixing the tuple and the individual flags on the same invocation
+  is a hard error.
 - **Authenticode PE hash** excludes three regions: PE checksum (4B at
   peHeaderOffset+88), certificate table data directory entry (8B), and
   existing cert table data.  Unsigned PEs are also padded to an 8-byte

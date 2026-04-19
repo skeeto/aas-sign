@@ -19,41 +19,50 @@ is fetched via FetchContent for TLS and SHA-256.
 
 ### Quick start
 
-    $ aas-sign login --endpoint <region>.codesigning.azure.net \
-                     --account <account>                       \
-                     --profile <profile>
+    $ aas-sign login <region>:<account>:<profile>
     $ aas-sign sign myapp.exe
 
-The first command opens your browser (Microsoft Entra Authorization
+The signer tuple has three fields separated by colons, in
+less-to-more-specific order.  `<region>` is the short region slug
+(e.g. `eus`, `neu`, `wus3`); it auto-expands to
+`<region>.codesigning.azure.net`.  If you need a non-standard
+endpoint, pass the full hostname instead of the slug.  For example:
+
+    $ aas-sign login eus:mycompany:me
+
+The login command opens your browser (Microsoft Entra Authorization
 Code + PKCE), caches a refresh token at
 `~/.config/aas-sign/token-cache.json` (POSIX) or
 `%APPDATA%\aas-sign\token-cache.json` (Windows), and saves the three
 signing defaults to `config.json` in the same directory.  Subsequent
 `aas-sign sign` invocations silently mint fresh access tokens from
 the cache and read the signing target from `config.json` — no
-Azure CLI, no retyping flags.
+Azure CLI, no retyping.
 
 The cache is revoked if you log out in Entra, the refresh token
 expires (~90 days of inactivity), or you delete the file (or run
 `aas-sign logout`).  Rerun `aas-sign login` to refresh.
 
-You can also pass `--endpoint`/`--account`/`--profile` directly to
-`aas-sign sign` each time (they override `config.json`), or create
-`config.json` by hand — `login`'s role in writing it is just a
-first-run convenience.  To update the defaults later without
-re-authenticating (e.g. pointing at a different region), use
-`aas-sign config` with the same three flags:
+To update the saved defaults later without re-authenticating, use
+`aas-sign config`:
 
-    $ aas-sign config --endpoint <other-region>.codesigning.azure.net
+    $ aas-sign config eus:othercompany:me
 
-It has the same merge semantics — only the fields you pass are
-updated; the rest stay as they were.
+For one-off signing against a different target, pass `--as` to
+`sign`, which overrides `config.json` for that invocation:
+
+    $ aas-sign sign --as eus:othercompany:me myapp.exe
+
+The three long flags `--endpoint`, `--account`, `--profile` are
+accepted everywhere the tuple is (mutually exclusive with it).
+They're what the GitHub Action emits under the hood and are the
+path to take when the three values come from separate variables
+(CI secrets, etc.) rather than as one string.
 
 ### Full synopsis
 
-    $ aas-sign sign --endpoint <region>.codesigning.azure.net \
-                    --account <account> \
-                    --profile <profile> \
+    $ aas-sign sign [--as <region>:<account>:<profile>] \
+                    [--endpoint <H> --account <N> --profile <P>] \
                     [--token <bearer-token>] \
                     [--oidc-client-id <ID> --oidc-tenant-id <ID>] \
                     [--timestamp-url <url> | --no-timestamp] \
@@ -61,9 +70,10 @@ updated; the rest stay as they were.
                     [--dump-cms <path>] \
                     <file.exe|file.dll> [<file.exe|file.dll> ...]
 
-    $ aas-sign login [--tenant <tenant>] [--client-id <id>] \
-                     [--endpoint <H> --account <N> --profile <P>]
+    $ aas-sign login [<region>:<account>:<profile>] \
+                     [--tenant <tenant>] [--client-id <id>]
     $ aas-sign logout
+    $ aas-sign config <region>:<account>:<profile>
     $ aas-sign config [--endpoint <H>] [--account <N>] [--profile <P>]
     $ aas-sign --version | --help
 
