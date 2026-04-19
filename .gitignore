@@ -1,1 +1,4 @@
 /build*/
+/deps/
+/aas-sign-*.tar.gz
+/_source_release/

@@ -10,27 +10,64 @@ endif()
 
 find_package(Threads REQUIRED)
 
-include(FetchContent)
+# Dependency resolution mode:
+#   FETCH (default)  nlohmann/json (+ mbedTLS on POSIX) come in via
+#                    CMake FetchContent.  If a bundled copy is present
+#                    under deps/<name>/ (as in a source-release
+#                    tarball), that's used directly -- no download.
+#                    Otherwise the pinned upstream archive is
+#                    downloaded.
+#   LOCAL            Use system-installed packages via find_package.
+#                    Skips any download and ignores deps/.
+set(DEPS "FETCH" CACHE STRING
+    "Dependency resolution: FETCH or LOCAL")
+set_property(CACHE DEPS PROPERTY STRINGS FETCH LOCAL)
 
-FetchContent_Declare(json
-  URL                     https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
-  URL_HASH                SHA256=d6c65aca6b1ed68e7a182f4757257b107ae403032760ed6ef121c9d55e81757d
-  DOWNLOAD_EXTRACT_TIMESTAMP FALSE)
-FetchContent_MakeAvailable(json)
+if(DEPS STREQUAL "LOCAL")
+  find_package(nlohmann_json REQUIRED)
+  message(STATUS "nlohmann/json: system")
+  if(NOT WIN32)
+    find_package(MbedTLS REQUIRED)
+    message(STATUS "mbedTLS: system")
+  endif()
+else()
+  include(FetchContent)
 
-if(NOT WIN32)
-  set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
-  set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
-  set(MBEDTLS_AS_SUBPROJECT ON CACHE BOOL "" FORCE)
-  # mbedTLS 3.6.2 enables -Werror by default and newer clang (>=19)
-  # adds diagnostics that trip it.  We don't need mbedTLS to be that
-  # strict for our consumer-level use.
-  set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
-  FetchContent_Declare(mbedtls
-    URL                     https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.2/mbedtls-3.6.2.tar.bz2
-    URL_HASH                SHA256=8b54fb9bcf4d5a7078028e0520acddefb7900b3e66fec7f7175bb5b7d85ccdca
+  if(IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/deps/json")
+    set(FETCHCONTENT_SOURCE_DIR_JSON "${CMAKE_CURRENT_SOURCE_DIR}/deps/json")
+    set(_json_origin "bundled")
+  else()
+    set(_json_origin "downloaded")
+  endif()
+  FetchContent_Declare(json
+    URL                     https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
+    URL_HASH                SHA256=d6c65aca6b1ed68e7a182f4757257b107ae403032760ed6ef121c9d55e81757d
     DOWNLOAD_EXTRACT_TIMESTAMP FALSE)
-  FetchContent_MakeAvailable(mbedtls)
+  FetchContent_MakeAvailable(json)
+  message(STATUS "nlohmann/json: ${_json_origin}")
+
+  if(NOT WIN32)
+    set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
+    set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+    set(MBEDTLS_AS_SUBPROJECT ON CACHE BOOL "" FORCE)
+    # mbedTLS 3.6.2 enables -Werror by default and newer clang (>=19)
+    # adds diagnostics that trip it.  We don't need mbedTLS to be that
+    # strict for our consumer-level use.
+    set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
+    if(IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls")
+      set(FETCHCONTENT_SOURCE_DIR_MBEDTLS
+          "${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls")
+      set(_mbedtls_origin "bundled")
+    else()
+      set(_mbedtls_origin "downloaded")
+    endif()
+    FetchContent_Declare(mbedtls
+      URL                     https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.2/mbedtls-3.6.2.tar.bz2
+      URL_HASH                SHA256=8b54fb9bcf4d5a7078028e0520acddefb7900b3e66fec7f7175bb5b7d85ccdca
+      DOWNLOAD_EXTRACT_TIMESTAMP FALSE)
+    FetchContent_MakeAvailable(mbedtls)
+    message(STATUS "mbedTLS: ${_mbedtls_origin}")
+  endif()
 endif()
 
 # Windows EXE metadata (CompanyName, FileVersion, etc.) via .rc file.
@@ -71,13 +108,14 @@ endif()
 if(WIN32)
   target_link_libraries(aas-sign PRIVATE
     winhttp bcrypt shell32 ws2_32)
+elseif(DEPS STREQUAL "LOCAL")
+  target_link_libraries(aas-sign PRIVATE
+    MbedTLS::mbedtls MbedTLS::mbedx509 MbedTLS::mbedcrypto)
 else()
   target_include_directories(aas-sign PRIVATE
     ${mbedtls_SOURCE_DIR}/include)
   target_link_libraries(aas-sign PRIVATE
-    mbedtls
-    mbedx509
-    mbedcrypto)
+    mbedtls mbedx509 mbedcrypto)
 endif()
 
 # libFuzzer harnesses.  Built only when explicitly requested; requires

@@ -18,6 +18,32 @@ C++20 (needed for `std::jthread`). Dependencies fetched via CMake
 FetchContent (nlohmann/json, mbedTLS on POSIX). Windows uses only system
 APIs (BCrypt, WinHTTP). pthreads on POSIX, winpthreads on MinGW.
 
+### Dependency resolution (`-DDEPS=`)
+
+- **`FETCH`** (default): nlohmann/json (+ mbedTLS on POSIX) come
+  in via CMake FetchContent.  If `deps/<name>/` exists in the
+  source tree it's used directly (offline); otherwise the pinned
+  upstream archive is downloaded.  Source-release tarballs ship
+  with `deps/` already populated, so `cmake -B build` works with
+  no network access.
+- **`LOCAL`**: use system-installed packages via `find_package`.
+  Skips any download and ignores `deps/`.  Useful on distros that
+  package these libs and for system-integrator builds.
+
+### Source releases
+
+`cmake -P cmake/SourceRelease.cmake` produces
+`aas-sign-VERSION.tar.gz` by `git archive`-ing HEAD and bundling
+the dependency trees into `deps/`.  The version string comes from
+`git describe --tags`.  The sibling `cmake/BundleDeps.cmake` can
+be invoked directly (`cmake -P cmake/BundleDeps.cmake`) to just
+materialise `deps/` in the current tree -- useful for working
+offline without generating a full tarball.
+
+Both URL/hash pairs in `BundleDeps.cmake` must stay in lock-step
+with the `FetchContent_Declare` entries in the top-level
+`CMakeLists.txt`.
+
 ## Fuzzing
 
 Hand-rolled byte parsers (`pe.cpp`, `x509.cpp`, `tsa.cpp`) have
