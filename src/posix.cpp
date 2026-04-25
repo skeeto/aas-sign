@@ -105,18 +105,24 @@ static std::string mbed_error(int ret)
 // any worker threads spawn -- so a plain bool is fine, no atomics or
 // mutex needed.
 static bool g_tls_insecure = false;
+// Optional explicit CA bundle path from --cacert, overriding both
+// $SSL_CERT_FILE and the well-known-paths probe below.
+static std::string g_ca_bundle_override;
 
 void tls_disable_verification() { g_tls_insecure = true; }
+void tls_set_ca_bundle(const std::string &path) { g_ca_bundle_override = path; }
 
-// Locate a system CA bundle.  Order, taken from libcurl's
-// well-known-paths heuristic: env override first, then the bundles
-// each major distro family ships at a known absolute path, then a
-// few Homebrew/MacPorts fallbacks.  All of these are PEM files
-// containing many concatenated certificates -- the format
+// Locate a system CA bundle.  Order: explicit --cacert override,
+// then $SSL_CERT_FILE (curl/Go/OpenSSL convention), then the
+// bundles each major distro family ships at a known absolute path,
+// then a few Homebrew/MacPorts fallbacks.  All of these are PEM
+// files containing many concatenated certificates -- the format
 // mbedtls_x509_crt_parse_file accepts directly.  Returns the empty
 // string when none of the paths exists.
 static std::string find_ca_bundle()
 {
+    if (!g_ca_bundle_override.empty())
+        return g_ca_bundle_override;
     if (const char *p = std::getenv("SSL_CERT_FILE"); p && *p) {
         struct stat st;
         if (::stat(p, &st) == 0)

@@ -126,6 +126,11 @@ static void usage_full(const char *argv0)
         << "                           Set individual fields (merge semantics).\n"
         << "\n"
         << "global options:\n"
+        << "  --cacert PATH        Use PATH (a PEM bundle) as the trust root\n"
+        << "                       for TLS verification, overriding\n"
+        << "                       $SSL_CERT_FILE and the well-known-paths\n"
+        << "                       probe.  POSIX only; on Windows WinHTTP\n"
+        << "                       always verifies against the system store.\n"
         << "  --insecure           Skip TLS certificate verification on every\n"
         << "                       outbound HTTPS request.  Off by default;\n"
         << "                       only useful for diagnosing trust-store\n"
@@ -521,18 +526,26 @@ static int sign_main(int argc, char **argv)
 // a subcommand.
 int aas_sign_main(int argc, char **argv)
 {
-    // Pre-dispatch sweep for --insecure so it works on any subcommand
-    // without each handler having to opt in.  Removes the flag from
-    // argv before subcommand dispatch sees it.
+    // Pre-dispatch sweep for global TLS flags so they work on any
+    // subcommand without each handler having to opt in.  Removes
+    // matched flags (and their values) from argv before subcommand
+    // dispatch sees them.
+    auto erase_argv = [&](int from, int n) {
+        for (int j = from; j + n < argc; j++)
+            argv[j] = argv[j + n];
+        for (int k = 0; k < n; k++)
+            argv[--argc] = nullptr;
+    };
     for (int i = 1; i < argc; ) {
         if (!strcmp(argv[i], "--insecure")) {
             platform::tls_disable_verification();
             platform::write_stderr(
                 "warning: --insecure: TLS certificate verification "
                 "is disabled\n");
-            for (int j = i; j < argc - 1; j++)
-                argv[j] = argv[j + 1];
-            argv[--argc] = nullptr;
+            erase_argv(i, 1);
+        } else if (!strcmp(argv[i], "--cacert") && i + 1 < argc) {
+            platform::tls_set_ca_bundle(argv[i + 1]);
+            erase_argv(i, 2);
         } else {
             i++;
         }

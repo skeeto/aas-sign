@@ -231,6 +231,17 @@ static bool g_tls_insecure = false;
 
 void tls_disable_verification() { g_tls_insecure = true; }
 
+// --cacert is a no-op on Windows: WinHTTP delegates verification to
+// the system certificate store and there's no equivalent of mbedTLS's
+// "use exactly this PEM file."  Mention it once on stderr so the
+// option's behaviour isn't a silent surprise.
+void tls_set_ca_bundle(const std::string &path)
+{
+    write_stderr("warning: --cacert " + path +
+                 " has no effect on Windows; WinHTTP verifies against "
+                 "the system certificate store\n");
+}
+
 // Apply the WinHTTP equivalent of curl's --insecure to a request
 // handle.  No-op when verification is on.  Must be called between
 // WinHttpOpenRequest and WinHttpSendRequest.

@@ -75,6 +75,15 @@ HttpResponse https_post_url(const std::string &url,
 // thread spawns.
 void tls_disable_verification();
 
+// Override the CA bundle path used for TLS verification.  Takes
+// precedence over $SSL_CERT_FILE and the well-known-paths probe.
+// POSIX only -- on Windows, WinHTTP verifies against the system
+// certificate store and pinning to a single bundle file isn't
+// straightforward; this function is a no-op there and the caller
+// gets a one-line stderr note instead.  Like tls_disable_verification,
+// not thread-safe; call once at startup.
+void tls_set_ca_bundle(const std::string &path);
+
 // 64-bit-offset file I/O with checked error handling.  Paths are UTF-8
 // on all platforms (transcoded to UTF-16 for Windows CreateFileW).
 // Every method throws std::runtime_error on error or short transfer.
