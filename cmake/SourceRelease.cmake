@@ -12,17 +12,30 @@ set(SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/..")
 
 find_program(GIT git REQUIRED)
 
-# Derive a version string from git: prefer `vX.Y.Z` tags, fall back
-# to a dated UTC stamp if the working tree has no tags at all.
-execute_process(
-  COMMAND "${GIT}" describe --tags --abbrev=8 --always
-  WORKING_DIRECTORY "${SOURCE_DIR}"
-  OUTPUT_VARIABLE VERSION
-  OUTPUT_STRIP_TRAILING_WHITESPACE
-  RESULT_VARIABLE rc
-)
-if(rc OR NOT VERSION)
-  string(TIMESTAMP VERSION "%Y%m%d" UTC)
+# Version selection, in order of precedence:
+#   1. $AAS_SIGN_RELEASE_VERSION env var, when set.  Used by the
+#      release workflow to pass GITHUB_REF_NAME directly so we
+#      don't need git's tag metadata in the runner's checkout
+#      (actions/checkout@v5 + fetch-tags + tag triggers + shallow
+#      clone collide on refspecs).
+#   2. `git describe --tags --abbrev=8 --always` against the
+#      working tree.  Picks up vX.Y.Z tags as plain "X.Y.Z" and
+#      post-tag commits as "X.Y.Z-N-gSHA".
+#   3. UTC date stamp, as a last-resort fallback for trees with no
+#      tags at all.
+if(DEFINED ENV{AAS_SIGN_RELEASE_VERSION} AND NOT "$ENV{AAS_SIGN_RELEASE_VERSION}" STREQUAL "")
+  set(VERSION "$ENV{AAS_SIGN_RELEASE_VERSION}")
+else()
+  execute_process(
+    COMMAND "${GIT}" describe --tags --abbrev=8 --always
+    WORKING_DIRECTORY "${SOURCE_DIR}"
+    OUTPUT_VARIABLE VERSION
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE rc
+  )
+  if(rc OR NOT VERSION)
+    string(TIMESTAMP VERSION "%Y%m%d" UTC)
+  endif()
 endif()
 string(REGEX REPLACE "^v" "" VERSION "${VERSION}")
 

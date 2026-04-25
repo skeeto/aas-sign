@@ -22,10 +22,6 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
-        with:
-          # SourceRelease.cmake uses `git describe --tags`; make sure
-          # the tag object itself is present, not just the commit.
-          fetch-tags: true
       - name: Build
         run: |
           set -euxo pipefail
@@ -41,6 +37,12 @@ jobs:
           path: aas-sign-linux-x86_64
 
       - name: Package source release
+        env:
+          # SourceRelease.cmake reads this in preference to running
+          # `git describe`, which would otherwise need the tag object
+          # in the checkout (actions/checkout@v5 + fetch-tags +
+          # shallow + tag-trigger collide on refspecs).
+          AAS_SIGN_RELEASE_VERSION: ${{ github.ref_name }}
         run: |
           set -euxo pipefail
           cmake -P cmake/SourceRelease.cmake
