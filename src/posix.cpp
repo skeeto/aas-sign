@@ -8,6 +8,7 @@
 #include <mbedtls/entropy.h>
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/error.h>
+#include <mbedtls/x509_crt.h>
 
 #include <arpa/inet.h>
 #include <cerrno>
@@ -98,12 +99,54 @@ static std::string mbed_error(int ret)
     return buf;
 }
 
+// TLS verification mode.  Defaults to verifying against the system CA
+// bundle.  --insecure flips this off for the rest of the process via
+// platform::tls_disable_verification().  Set once at startup, before
+// any worker threads spawn -- so a plain bool is fine, no atomics or
+// mutex needed.
+static bool g_tls_insecure = false;
+
+void tls_disable_verification() { g_tls_insecure = true; }
+
+// Locate a system CA bundle.  Order, taken from libcurl's
+// well-known-paths heuristic: env override first, then the bundles
+// each major distro family ships at a known absolute path, then a
+// few Homebrew/MacPorts fallbacks.  All of these are PEM files
+// containing many concatenated certificates -- the format
+// mbedtls_x509_crt_parse_file accepts directly.  Returns the empty
+// string when none of the paths exists.
+static std::string find_ca_bundle()
+{
+    if (const char *p = std::getenv("SSL_CERT_FILE"); p && *p) {
+        struct stat st;
+        if (::stat(p, &st) == 0)
+            return p;
+    }
+    static const char *paths[] = {
+        "/etc/ssl/certs/ca-certificates.crt",       // Debian/Ubuntu/Arch
+        "/etc/pki/tls/certs/ca-bundle.crt",         // RHEL/CentOS/Fedora
+        "/etc/ssl/ca-bundle.pem",                   // OpenSUSE
+        "/etc/ssl/cert.pem",                        // Alpine/FreeBSD/macOS Homebrew
+        "/etc/pki/tls/cacert.pem",
+        "/usr/local/share/certs/ca-root-nss.crt",   // FreeBSD ports
+        "/usr/local/etc/openssl@3/cert.pem",        // Homebrew (Intel)
+        "/opt/homebrew/etc/openssl@3/cert.pem",     // Homebrew (Apple Silicon)
+    };
+    for (const char *p : paths) {
+        struct stat st;
+        if (::stat(p, &st) == 0)
+            return p;
+    }
+    return "";
+}
+
 struct TlsConnection {
     mbedtls_net_context server_fd;
     mbedtls_entropy_context entropy;
     mbedtls_ctr_drbg_context ctr_drbg;
     mbedtls_ssl_context ssl;
     mbedtls_ssl_config conf;
+    mbedtls_x509_crt cacert;
 
     TlsConnection(const std::string &host)
     {
@@ -112,6 +155,7 @@ struct TlsConnection {
         mbedtls_ssl_config_init(&conf);
         mbedtls_ctr_drbg_init(&ctr_drbg);
         mbedtls_entropy_init(&entropy);
+        mbedtls_x509_crt_init(&cacert);
 
         int ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func,
                                         &entropy, nullptr, 0);
@@ -132,15 +176,34 @@ struct TlsConnection {
             throw std::runtime_error("ssl_config_defaults: " +
                                      mbed_error(ret));
 
-        // Skip certificate verification (Azure certs are trusted and
-        // this is a CI signing tool, not a browser).
-        mbedtls_ssl_conf_authmode(&conf, MBEDTLS_SSL_VERIFY_NONE);
+        if (g_tls_insecure) {
+            mbedtls_ssl_conf_authmode(&conf, MBEDTLS_SSL_VERIFY_NONE);
+        } else {
+            std::string bundle = find_ca_bundle();
+            if (bundle.empty())
+                throw std::runtime_error(
+                    "no CA certificate bundle found at any standard "
+                    "location; install ca-certificates, set "
+                    "SSL_CERT_FILE, or pass --insecure to skip "
+                    "TLS verification");
+            // Positive return = number of certs that failed to parse;
+            // we tolerate that as long as some certs loaded.  Negative
+            // = hard error.
+            ret = mbedtls_x509_crt_parse_file(&cacert, bundle.c_str());
+            if (ret < 0)
+                throw std::runtime_error(
+                    "failed to parse CA bundle " + bundle + ": " +
+                    mbed_error(ret));
+            mbedtls_ssl_conf_ca_chain(&conf, &cacert, nullptr);
+            mbedtls_ssl_conf_authmode(&conf, MBEDTLS_SSL_VERIFY_REQUIRED);
+        }
         mbedtls_ssl_conf_rng(&conf, mbedtls_ctr_drbg_random, &ctr_drbg);
 
         ret = mbedtls_ssl_setup(&ssl, &conf);
         if (ret != 0)
             throw std::runtime_error("ssl_setup: " + mbed_error(ret));
 
+        // SNI + (when verifying) cert hostname check.
         ret = mbedtls_ssl_set_hostname(&ssl, host.c_str());
         if (ret != 0)
             throw std::runtime_error("ssl_set_hostname: " +
@@ -165,6 +228,7 @@ struct TlsConnection {
         mbedtls_ssl_config_free(&conf);
         mbedtls_ctr_drbg_free(&ctr_drbg);
         mbedtls_entropy_free(&entropy);
+        mbedtls_x509_crt_free(&cacert);
     }
 
     void write_all(const std::string &data)

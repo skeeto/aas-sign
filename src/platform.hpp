@@ -67,6 +67,14 @@ HttpResponse https_post_url(const std::string &url,
                             const std::string &content_type,
                             const std::string &body);
 
+// Disable TLS certificate verification on all subsequent HTTPS calls
+// (POSIX: mbedTLS authmode VERIFY_NONE; Windows: WinHTTP security flags
+// ignoring CA / CN / date / usage).  Defaults to verification enabled
+// using the system CA bundle.  Intended to be called once at startup
+// when --insecure is passed.  Not thread-safe; call before any signing
+// thread spawns.
+void tls_disable_verification();
+
 // 64-bit-offset file I/O with checked error handling.  Paths are UTF-8
 // on all platforms (transcoded to UTF-16 for Windows CreateFileW).
 // Every method throws std::runtime_error on error or short transfer.

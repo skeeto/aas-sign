@@ -125,6 +125,13 @@ static void usage_full(const char *argv0)
         << "  --endpoint HOST, --account NAME, --profile NAME\n"
         << "                           Set individual fields (merge semantics).\n"
         << "\n"
+        << "global options:\n"
+        << "  --insecure           Skip TLS certificate verification on every\n"
+        << "                       outbound HTTPS request.  Off by default;\n"
+        << "                       only useful for diagnosing trust-store\n"
+        << "                       problems or talking to dev/staging\n"
+        << "                       endpoints with self-signed certs.\n"
+        << "\n"
         << "  --version            Print version and exit.\n"
         << "  --help, -h           Print this help and exit.\n";
     platform::write_stdout(os.str());
@@ -514,6 +521,23 @@ static int sign_main(int argc, char **argv)
 // a subcommand.
 int aas_sign_main(int argc, char **argv)
 {
+    // Pre-dispatch sweep for --insecure so it works on any subcommand
+    // without each handler having to opt in.  Removes the flag from
+    // argv before subcommand dispatch sees it.
+    for (int i = 1; i < argc; ) {
+        if (!strcmp(argv[i], "--insecure")) {
+            platform::tls_disable_verification();
+            platform::write_stderr(
+                "warning: --insecure: TLS certificate verification "
+                "is disabled\n");
+            for (int j = i; j < argc - 1; j++)
+                argv[j] = argv[j + 1];
+            argv[--argc] = nullptr;
+        } else {
+            i++;
+        }
+    }
+
     if (argc < 2) {
         usage_short(argv[0]);
         return 1;

@@ -221,6 +221,30 @@ static std::wstring to_wide(const std::string &s)
     return std::wstring(s.begin(), s.end());
 }
 
+// TLS verification mode.  Defaults to verifying via the Windows
+// certificate store (WinHTTP's built-in behaviour).  --insecure flips
+// this off via platform::tls_disable_verification(), after which
+// every request applies the four "ignore" security flags below.  Set
+// once at startup before any worker threads spawn -- so a plain bool
+// is fine.
+static bool g_tls_insecure = false;
+
+void tls_disable_verification() { g_tls_insecure = true; }
+
+// Apply the WinHTTP equivalent of curl's --insecure to a request
+// handle.  No-op when verification is on.  Must be called between
+// WinHttpOpenRequest and WinHttpSendRequest.
+static void apply_tls_insecure(HINTERNET req)
+{
+    if (!g_tls_insecure) return;
+    DWORD flags = SECURITY_FLAG_IGNORE_UNKNOWN_CA       |
+                  SECURITY_FLAG_IGNORE_CERT_CN_INVALID  |
+                  SECURITY_FLAG_IGNORE_CERT_DATE_INVALID|
+                  SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE;
+    WinHttpSetOption(req, WINHTTP_OPTION_SECURITY_FLAGS,
+                     &flags, sizeof(flags));
+}
+
 static HttpResponse winhttp_request(const std::string &host,
                                     const std::string &path,
                                     const std::string &bearer_token,
@@ -256,6 +280,7 @@ static HttpResponse winhttp_request(const std::string &host,
         WinHttpCloseHandle(session);
         throw std::runtime_error("WinHttpOpenRequest: " + win_error(err));
     }
+    apply_tls_insecure(req);
 
     std::wstring auth_header = L"Authorization: Bearer " + to_wide(bearer_token);
     WinHttpAddRequestHeaders(req, auth_header.c_str(), DWORD(-1),
@@ -377,6 +402,7 @@ static HttpResponse winhttp_url_request(const std::string &url,
         WinHttpCloseHandle(session);
         throw std::runtime_error("WinHttpOpenRequest: " + win_error(err));
     }
+    apply_tls_insecure(req);
 
     if (bearer_token) {
         std::wstring hdr = L"Authorization: Bearer " + to_wide(*bearer_token);
