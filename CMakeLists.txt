@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(aas-sign VERSION 1.1.0 LANGUAGES CXX C)
+project(aas-sign VERSION 1.1.1 LANGUAGES CXX C)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
