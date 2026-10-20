@@ -211,12 +211,12 @@ GitHub Actions OIDC federation,
 when both a client ID and a tenant ID are given,
 by
 .BR \-\-oidc\-client\-id " and " \-\-oidc\-tenant\-id
-or by
+or, within such a job, by
 .BR AZURE_CLIENT_ID " and " AZURE_TENANT_ID .
 This works only in a job with
 .B "id\-token: write"
-permission.
-Elsewhere it fails rather than falling through to the next source.
+permission;
+elsewhere the options are an error.
 .IP 3. 4
 The refresh token cached by
 .BR login .
@@ -233,7 +233,10 @@ is not given.
 .TP
 .BR AZURE_CLIENT_ID ", " AZURE_TENANT_ID
 Defaults for
-.BR \-\-oidc\-client\-id " and " \-\-oidc\-tenant\-id .
+.BR \-\-oidc\-client\-id " and " \-\-oidc\-tenant\-id ,
+used only when
+.B ACTIONS_ID_TOKEN_REQUEST_URL
+is set.
 .TP
 .BR ACTIONS_ID_TOKEN_REQUEST_URL ", " ACTIONS_ID_TOKEN_REQUEST_TOKEN
 Set by the GitHub Actions runner in jobs with

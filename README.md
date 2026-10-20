@@ -19,8 +19,12 @@ is fetched via FetchContent for TLS and SHA-256.
 
 ### Quick start
 
-    $ aas-sign login <region>:<account>:<profile>
+    $ aas-sign login --tenant <tenant> <region>:<account>:<profile>
     $ aas-sign sign myapp.exe
+
+`<tenant>` is your Microsoft Entra tenant ID or domain name.  The
+built-in default is the aas-sign author's own tenant, so you almost
+certainly need `--tenant`.
 
 The signer tuple has three fields separated by colons, in
 less-to-more-specific order.  `<region>` is the short region slug
@@ -28,7 +32,7 @@ less-to-more-specific order.  `<region>` is the short region slug
 `<region>.codesigning.azure.net`.  If you need a non-standard
 endpoint, pass the full hostname instead of the slug.  For example:
 
-    $ aas-sign login eus:mycompany:me
+    $ aas-sign login --tenant mycompany.com eus:mycompany:me
 
 The login command opens your browser (Microsoft Entra Authorization
 Code + PKCE), caches a refresh token at
@@ -203,7 +207,8 @@ auto-masks them in logs.
 `aas-sign` performs the OIDC-to-Azure-token exchange itself via its
 `--oidc-client-id` / `--oidc-tenant-id` flags (which read
 `AZURE_CLIENT_ID` / `AZURE_TENANT_ID` from the process environment as a
-fallback).  The release workflow sets those env vars from the secrets
+fallback, but only inside a GitHub Actions job with `id-token: write`,
+so those variables on a workstation don't override a cached login).  The release workflow sets those env vars from the secrets
 above and then invokes `aas-sign` directly — no `azure/login`, no
 Azure CLI on the runner, no `AZURE_SUBSCRIPTION_ID` needed.
 

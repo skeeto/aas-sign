@@ -83,10 +83,10 @@ static void usage_full(const char *argv0)
         << "  --oidc-client-id ID  Azure app client ID.  Combined with\n"
         << "                       --oidc-tenant-id, mints a token from GitHub\n"
         << "                       Actions OIDC federation (CI only; requires\n"
-        << "                       permissions: id-token: write).  Falls back\n"
-        << "                       to the AZURE_CLIENT_ID environment variable.\n"
+        << "                       permissions: id-token: write).  In such a\n"
+        << "                       job, falls back to AZURE_CLIENT_ID.\n"
         << "  --oidc-tenant-id ID  Azure tenant ID for --oidc-client-id.\n"
-        << "                       Falls back to AZURE_TENANT_ID.\n"
+        << "                       In such a job, falls back to AZURE_TENANT_ID.\n"
         << "  --timestamp-url URL  RFC 3161 timestamp authority.  Default is\n"
         << "                       Microsoft's public TSA.  Use --no-timestamp\n"
         << "                       to skip.\n"
@@ -391,20 +391,26 @@ static int sign_main(int argc, char **argv)
     // Token resolution, in order of precedence:
     //   1. --token
     //   2. $AZURE_ACCESS_TOKEN
-    //   3. OIDC (if --oidc-client-id + --oidc-tenant-id, or their env
-    //      fallbacks AZURE_CLIENT_ID/AZURE_TENANT_ID, are set AND the
-    //      runner has injected the id-token endpoint)
+    //   3. OIDC, if --oidc-client-id + --oidc-tenant-id are set, or
+    //      their env fallbacks AZURE_CLIENT_ID/AZURE_TENANT_ID are set
+    //      inside a GitHub Actions job that may mint id-tokens.
     //   4. Cached refresh token from a prior `aas-sign login`.
+    // The env fallbacks are gated on the runner's id-token endpoint
+    // because AZURE_CLIENT_ID/AZURE_TENANT_ID are common on
+    // workstations (Azure SDK EnvironmentCredential), where they must
+    // not hijack the cached-login path.
     if (cfg.token.empty()) {
         if (const char *env = getenv("AZURE_ACCESS_TOKEN"))
             cfg.token = env;
     }
-    if (cfg.oidc_client_id.empty())
-        if (const char *env = getenv("AZURE_CLIENT_ID"))
-            cfg.oidc_client_id = env;
-    if (cfg.oidc_tenant_id.empty())
-        if (const char *env = getenv("AZURE_TENANT_ID"))
-            cfg.oidc_tenant_id = env;
+    if (getenv("ACTIONS_ID_TOKEN_REQUEST_URL")) {
+        if (cfg.oidc_client_id.empty())
+            if (const char *env = getenv("AZURE_CLIENT_ID"))
+                cfg.oidc_client_id = env;
+        if (cfg.oidc_tenant_id.empty())
+            if (const char *env = getenv("AZURE_TENANT_ID"))
+                cfg.oidc_tenant_id = env;
+    }
 
     if (cfg.token.empty() &&
         !cfg.oidc_client_id.empty() && !cfg.oidc_tenant_id.empty()) {
@@ -564,14 +570,24 @@ int aas_sign_main(int argc, char **argv)
                                AAS_SIGN_VERSION + "\n");
         return 0;
     }
-    if (!strcmp(argv[1], "sign"))
-        return sign_main(argc, argv);
-    if (!strcmp(argv[1], "login"))
-        return login_main(argc, argv);
-    if (!strcmp(argv[1], "logout"))
-        return logout_main(argc, argv);
-    if (!strcmp(argv[1], "config"))
-        return config_main(argc, argv);
+    // Subcommands report most failures themselves, but anything that
+    // escapes (network errors, unwritable config dir, ...) must still
+    // become an error message and exit status 1, not std::terminate.
+    try {
+        if (!strcmp(argv[1], "sign"))
+            return sign_main(argc, argv);
+        if (!strcmp(argv[1], "login"))
+            return login_main(argc, argv);
+        if (!strcmp(argv[1], "logout"))
+            return logout_main(argc, argv);
+        if (!strcmp(argv[1], "config"))
+            return config_main(argc, argv);
+    } catch (const std::exception &e) {
+        std::ostringstream os;
+        os << argv[0] << " " << argv[1] << ": error: " << e.what() << '\n';
+        platform::write_stderr(os.str());
+        return 1;
+    }
 
     {
         std::ostringstream os;
