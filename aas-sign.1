@@ -1,0 +1,327 @@
+.TH AAS-SIGN 1 2026-10-19 aas-sign
+.SH NAME
+aas\-sign \- sign Windows PE images with Azure Artifact Signing
+.SH SYNOPSIS
+.B aas\-sign sign
+.RB [ \-\-as
+.IR region : account : profile ]
+.RI [ options ]
+.IR file " ..."
+.br
+.B aas\-sign login
+.RI [ region : account : profile ]
+.RI [ options ]
+.br
+.B aas\-sign logout
+.br
+.B aas\-sign config
+.IR region : account : profile
+.br
+.B aas\-sign config
+.RB [ \-\-endpoint
+.IR host ]
+.RB [ \-\-account
+.IR name ]
+.RB [ \-\-profile
+.IR name ]
+.br
+.B aas\-sign
+.BR \-\-help " | " \-\-version
+.SH DESCRIPTION
+.B aas\-sign
+signs PE images, such as EXE and DLL files,
+using Azure Artifact Signing (formerly Trusted Signing),
+with no local private key.
+It computes each file's Authenticode SHA-256 digest,
+has Azure sign it,
+timestamps the signature with an RFC 3161 time-stamp authority,
+and embeds the result in the file.
+Files are modified in place, replacing any existing signature.
+Progress and errors are written to standard error.
+.SH COMMANDS
+.TP
+.B sign
+Sign each
+.IR file .
+Given several, up to
+.B \-\-max\-parallel
+are signed at once,
+each file's output is printed as one block prefixed with its name,
+and a summary follows.
+A failure does not stop the remaining files.
+.TP
+.B login
+Sign in to Microsoft Entra ID with the system web browser
+(authorization code flow with PKCE),
+and cache a refresh token for later
+.B sign
+commands.
+Entra redirects the browser to a temporary listener on
+.BR localhost ,
+so the browser must run on the same machine.
+If none opens, visit the URL printed on standard error.
+A signing target, if given, is then saved as by
+.BR config .
+.TP
+.B logout
+Delete the cached refresh token.
+This does not revoke it.
+.TP
+.B config
+Save signing defaults to
+.I config.json
+without signing in.
+A
+.IR region : account : profile
+argument sets all three, while
+.BR \-\-endpoint ,
+.BR \-\-account ,
+and
+.B \-\-profile
+set only those given.
+.SH OPTIONS
+.SS Signing target
+A signing target is a regional endpoint, an Artifact Signing account,
+and a certificate profile,
+given either as one
+.IR region : account : profile
+tuple or with the options below, but not both.
+A
+.I region
+without a dot expands to
+.IB region \%.codesigning.azure.net\fR,
+so
+.B eus:contoso:release
+names endpoint
+.BR \%eus.codesigning.azure.net ,
+account
+.BR contoso ,
+and profile
+.BR release .
+A
+.I region
+containing a dot is taken as the hostname itself.
+.B sign
+fills in any part not given from
+.IR config.json ,
+which
+.B login
+and
+.B config
+write.
+.TP
+.BI "\-\-as " region\fR:\fIaccount\fR:\fIprofile
+The signing target as one tuple, for
+.BR sign .
+.B login
+and
+.B config
+take it as an argument instead.
+.TP
+.BI \-\-endpoint " host"
+Endpoint hostname, such as
+.BR \%eus.codesigning.azure.net .
+A URL is also accepted.
+.TP
+.BI \-\-account " name"
+Artifact Signing account name.
+.TP
+.BI \-\-profile " name"
+Certificate profile name.
+.SS Sign options
+.TP
+.BI \-\-token " token"
+Azure access token for the
+.B \%https://codesigning.azure.net
+resource; see
+.BR AUTHENTICATION .
+.TP
+.BI \-\-oidc\-client\-id " id"
+Client ID of an Entra app registration with a federated credential
+trusting the GitHub Actions workflow; see
+.BR AUTHENTICATION .
+.TP
+.BI \-\-oidc\-tenant\-id " id"
+Tenant ID of that app registration.
+.TP
+.BI \-\-timestamp\-url " url"
+RFC 3161 time-stamp authority, as a plain
+.B http://
+URL.
+Default:
+.B \%http://timestamp.acs.microsoft.com/timestamping/RFC3161
+.TP
+.B \-\-no\-timestamp
+Do not timestamp.
+Not recommended: Artifact Signing certificates are short-lived,
+and an untimestamped signature becomes invalid when its certificate expires.
+.TP
+.BI \-\-max\-parallel " n"
+Sign at most
+.I n
+files concurrently.
+Default: 8.
+.TP
+.BI \-\-dump\-cms " path"
+Also write the DER-encoded CMS signature to
+.I path
+for inspection, such as with
+.BR openssl\-asn1parse (1).
+Only when signing a single file.
+.SS Login options
+.TP
+.BI \-\-tenant " tenant"
+Entra tenant to sign in to, as an ID or domain name.
+The default is the aas\-sign author's own tenant,
+so most users need this option.
+.TP
+.BI \-\-client\-id " id"
+Entra application (client) ID to sign in with.
+Default: \%04b07795\-8ddb\-461a\-bbee\-02f9e1bf7b46,
+the Azure CLI's public client.
+.SS General options
+.B \-\-cacert
+and
+.B \-\-insecure
+may appear anywhere and apply to any command.
+.TP
+.BI \-\-cacert " path"
+Verify TLS servers against the PEM certificate bundle at
+.IR path .
+Ignored, with a warning, on Windows,
+which always uses the system certificate store.
+.TP
+.B \-\-insecure
+Disable TLS certificate verification, for diagnosing trust problems.
+.TP
+.BR \-h ", " \-\-help
+Print a usage summary and exit.
+.TP
+.B \-\-version
+Print the version and exit.
+.SH AUTHENTICATION
+.B sign
+obtains an Azure access token from the first available of:
+.IP 1. 4
+.B \-\-token
+or
+.BR AZURE_ACCESS_TOKEN .
+.IP 2. 4
+GitHub Actions OIDC federation,
+when both a client ID and a tenant ID are given,
+by
+.BR \-\-oidc\-client\-id " and " \-\-oidc\-tenant\-id
+or by
+.BR AZURE_CLIENT_ID " and " AZURE_TENANT_ID .
+This works only in a job with
+.B "id\-token: write"
+permission.
+Elsewhere it fails rather than falling through to the next source.
+.IP 3. 4
+The refresh token cached by
+.BR login .
+If Entra rejects it as expired or revoked,
+the cache is deleted and
+.B login
+must be run again.
+.SH ENVIRONMENT
+.TP
+.B AZURE_ACCESS_TOKEN
+Access token used if
+.B \-\-token
+is not given.
+.TP
+.BR AZURE_CLIENT_ID ", " AZURE_TENANT_ID
+Defaults for
+.BR \-\-oidc\-client\-id " and " \-\-oidc\-tenant\-id .
+.TP
+.BR ACTIONS_ID_TOKEN_REQUEST_URL ", " ACTIONS_ID_TOKEN_REQUEST_TOKEN
+Set by the GitHub Actions runner in jobs with
+.B "id\-token: write"
+permission, and required for OIDC federation.
+.TP
+.B SSL_CERT_FILE
+PEM bundle of trusted CA certificates,
+used if
+.B \-\-cacert
+is not given and the file exists.
+Otherwise the first bundle found at a standard location, such as
+.IR /etc/ssl/certs/ca\-certificates.crt ,
+is used.
+Ignored on Windows.
+.TP
+.BR XDG_CONFIG_HOME ", " HOME
+Locate the configuration directory, except on Windows.
+.SH FILES
+.TP
+.I ~/.config/aas\-sign/
+The configuration directory, or
+.I $XDG_CONFIG_HOME/aas\-sign/
+if that is set, or
+.I %APPDATA%\eaas\-sign\e
+on Windows.
+On POSIX it is created with mode 0700,
+and the files in it are written with mode 0600.
+.TP
+.I config.json
+Signing defaults, as a JSON object with optional
+.BR endpoint ,
+.BR account ,
+and
+.B profile
+string members.
+.TP
+.I token\-cache.json
+Refresh token written by
+.B login
+and updated by
+.B sign
+as Entra rotates it.
+It can obtain access tokens as the signed-in user, so keep it private.
+.SH EXIT STATUS
+.B aas\-sign
+exits 0 on success, and >0 if an error occurs,
+including when any one of several files fails to sign.
+.SH EXAMPLES
+Sign in once, saving a signing target, then sign two files:
+.PP
+.RS 4
+.nf
+$ aas\-sign login \-\-tenant contoso.com eus:contoso:release
+$ aas\-sign sign app.exe plugin.dll
+.fi
+.RE
+.PP
+Sign with a different certificate profile, just this once:
+.PP
+.RS 4
+.nf
+$ aas\-sign sign \-\-as eus:contoso:testing app.exe
+.fi
+.RE
+.PP
+Sign with an Azure CLI login instead:
+.PP
+.RS 4
+.nf
+$ export AZURE_ACCESS_TOKEN="$(az account get\-access\-token \e
+    \-\-resource https://codesigning.azure.net \e
+    \-\-query accessToken \-o tsv)"
+$ aas\-sign sign app.exe
+.fi
+.RE
+.PP
+Check the result:
+.PP
+.RS 4
+.nf
+$ osslsigncode verify app.exe
+.fi
+.RE
+.SH SEE ALSO
+.BR osslsigncode (1),
+.BR openssl\-asn1parse (1)
+.PP
+The project page,
+.IR \%https://github.com/skeeto/aas\-sign ,
+also documents the companion GitHub Action.
